@@ -1,0 +1,35 @@
+diff --git "a/C:\\Users\\User\\Desktop\\ygodb\\edopro-src\\irrlicht\\src\\CNullDriver.cpp.orig" "b/C:\\Users\\User\\Desktop\\ygodb\\edopro-src\\irrlicht\\src\\CNullDriver.cpp"
+index 34aa9bd..c1f16c2 100644
+--- "a/C:\\Users\\User\\Desktop\\ygodb\\edopro-src\\irrlicht\\src\\CNullDriver.cpp.orig"
++++ "b/C:\\Users\\User\\Desktop\\ygodb\\edopro-src\\irrlicht\\src\\CNullDriver.cpp"
+@@ -697,14 +697,22 @@ void CNullDriver::addTexture(video::ITexture* texture)
+ 		s.Surface = texture;
+ 		texture->grab();
+ 
+-		Textures.push_back(s);
+-
+-		// the new texture is now at the end of the texture list. when searching for
+-		// the next new texture, the texture array will be sorted and the index of this texture
+-		// will be changed. to let the order be more consistent to the user, sort
+-		// the textures now already although this isn't necessary:
+-
+-		Textures.sort();
++		// The texture list is kept sorted by name (findTexture does a binary search on it). Sorting the whole
++		// list again for every new texture (a heap sort) makes adding thousands of textures take quadratic time,
++		// so insert the new texture at its place instead (after any textures with an equal name).
++		Textures.sort(); // does nothing when the list is already sorted
++		u32 low = 0;
++		u32 high = Textures.size();
++		while (low < high)
++		{
++			const u32 mid = (low + high) >> 1;
++			if (s < Textures[mid])
++				high = mid;
++			else
++				low = mid + 1;
++		}
++		Textures.insert(s, low);
++		Textures.set_sorted(true);
+ 	}
+ }
+ 

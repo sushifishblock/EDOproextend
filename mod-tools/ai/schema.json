@@ -1,0 +1,235 @@
+{
+ "type": "object",
+ "additionalProperties": false,
+ "properties": {
+  "filters": {
+   "type": "object",
+   "additionalProperties": false,
+   "properties": {
+    "card_type": {
+     "type": "string",
+     "enum": [
+      "monster",
+      "spell",
+      "trap"
+     ]
+    },
+    "monster_types": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "normal",
+       "effect",
+       "fusion",
+       "ritual",
+       "synchro",
+       "xyz",
+       "pendulum",
+       "link",
+       "tuner",
+       "spirit",
+       "union",
+       "gemini",
+       "flip",
+       "toon"
+      ]
+     }
+    },
+    "spell_trap_kinds": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "normal",
+       "quick-play",
+       "continuous",
+       "equip",
+       "field",
+       "ritual",
+       "counter"
+      ]
+     }
+    },
+    "races": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "Warrior",
+       "Spellcaster",
+       "Fairy",
+       "Fiend",
+       "Zombie",
+       "Machine",
+       "Aqua",
+       "Pyro",
+       "Rock",
+       "Winged Beast",
+       "Plant",
+       "Insect",
+       "Thunder",
+       "Dragon",
+       "Beast",
+       "Beast-Warrior",
+       "Dinosaur",
+       "Fish",
+       "Sea Serpent",
+       "Reptile",
+       "Psychic",
+       "Divine-Beast",
+       "Creator God",
+       "Wyrm",
+       "Cyberse",
+       "Illusion"
+      ]
+     }
+    },
+    "attributes": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "EARTH",
+       "WATER",
+       "FIRE",
+       "WIND",
+       "LIGHT",
+       "DARK",
+       "DIVINE"
+      ]
+     }
+    },
+    "level": {
+     "type": "object",
+     "description": "Level of non-Xyz non-Link monsters",
+     "properties": {
+      "min": {
+       "type": "integer"
+      },
+      "max": {
+       "type": "integer"
+      }
+     },
+     "additionalProperties": false
+    },
+    "rank": {
+     "type": "object",
+     "description": "Rank of Xyz monsters",
+     "properties": {
+      "min": {
+       "type": "integer"
+      },
+      "max": {
+       "type": "integer"
+      }
+     },
+     "additionalProperties": false
+    },
+    "link_rating": {
+     "type": "object",
+     "description": "Link rating of Link monsters",
+     "properties": {
+      "min": {
+       "type": "integer"
+      },
+      "max": {
+       "type": "integer"
+      }
+     },
+     "additionalProperties": false
+    },
+    "atk": {
+     "type": "object",
+     "description": "ATK range",
+     "properties": {
+      "min": {
+       "type": "integer"
+      },
+      "max": {
+       "type": "integer"
+      }
+     },
+     "additionalProperties": false
+    },
+    "def": {
+     "type": "object",
+     "description": "DEF range",
+     "properties": {
+      "min": {
+       "type": "integer"
+      },
+      "max": {
+       "type": "integer"
+      }
+     },
+     "additionalProperties": false
+    },
+    "pendulum_scale": {
+     "type": "object",
+     "description": "Pendulum Scale range (either scale)",
+     "properties": {
+      "min": {
+       "type": "integer"
+      },
+      "max": {
+       "type": "integer"
+      }
+     },
+     "additionalProperties": false
+    },
+    "pendulum_scales": {
+     "type": "array",
+     "items": {
+      "type": "integer"
+     },
+     "description": "exact scales the card must have, e.g. [1,8]"
+    },
+    "name_or_archetype": {
+     "type": "string"
+    },
+    "ban_status": {
+     "type": "string",
+     "enum": [
+      "forbidden",
+      "limited",
+      "semi_limited",
+      "any_restricted"
+     ]
+    }
+   }
+  },
+  "effect_description": {
+   "type": "string"
+  },
+  "text_keywords": {
+   "type": "array",
+   "items": {
+    "type": "string"
+   },
+   "maxItems": 4
+  },
+  "result_limit": {
+   "type": "integer"
+  },
+  "sort_by": {
+   "type": "string",
+   "enum": [
+    "atk_desc",
+    "atk_asc",
+    "def_desc",
+    "level_desc",
+    "level_asc"
+   ]
+  },
+  "explanation": {
+   "type": "string"
+  }
+ },
+ "required": [
+  "filters",
+  "effect_description",
+  "text_keywords",
+  "explanation"
+ ]
+}

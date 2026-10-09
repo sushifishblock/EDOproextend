@@ -1,0 +1,75 @@
+// Copyright (C) 2021 Edoardo Lolletti
+
+#import <UIKit/UIPasteboard.h>
+#include <sys/utsname.h>
+#include "../bufferio.h"
+#include "../text_types.h"
+#include "../fmt.h"
+#include "COSiOSOperator.h"
+
+namespace irr {
+
+// constructor
+COSiOSOperator::COSiOSOperator() {
+#ifdef _DEBUG
+	setDebugName("COSiOSOperator");
+#endif
+	auto processInfo = [NSProcessInfo processInfo];
+	std::string os_verstring;
+	if([processInfo respondsToSelector:@selector(operatingSystemVersion:)]) {
+		auto version = [processInfo operatingSystemVersion];
+		os_verstring = epro::format("{}.{}.{}", version.majorVersion, version.minorVersion, version.patchVersion);
+	} else {
+		os_verstring = [processInfo operatingSystemVersionString].UTF8String;
+	}
+	struct utsname name;
+	uname(&name);
+	const auto verstring = epro::format("iOS version: {} {}",
+									   os_verstring, name.version);
+	OperatingSystem = { verstring.data(), (u32)verstring.size() };
+	epro::print("{}\n", OperatingSystem);
+}
+
+
+//! returns the current operating system version as string.
+const core::stringc& COSiOSOperator::getOperatingSystemVersion() const {
+	return OperatingSystem;
+}
+
+
+//! copies text to the clipboard
+void COSiOSOperator::copyToClipboard(const wchar_t* wtext) const {
+	auto wlen = wcslen(wtext);
+	if(wlen == 0)
+		return;
+	@autoreleasepool {
+		[UIPasteboard generalPasteboard].string = @(BufferIO::EncodeUTF8({wtext, wlen}).data());
+	}
+}
+
+
+//! gets text from the clipboard
+//! \return Returns 0 if no string is in there.
+const wchar_t* COSiOSOperator::getTextFromClipboard() const {
+	@autoreleasepool {
+		UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+		NSString *string = pasteboard.string;
+		if (string != nil)
+			ClipboardString = BufferIO::DecodeUTF8(string.UTF8String);
+		else
+			ClipboardString.clear();
+	}
+	return ClipboardString.data();
+}
+
+
+bool COSiOSOperator::getProcessorSpeedMHz(u32* MHz) const {
+	return false;
+}
+
+bool COSiOSOperator::getSystemMemory(u32* Total, u32* Avail) const {
+	return false;
+}
+
+
+} // end namespace
