@@ -63,6 +63,8 @@ void DataHandler::LoadPicUrls() {
 					if(url == "default") {
 						if(type == "pic") {
 #ifdef DEFAULT_PIC_URL
+							//the 813x1185 pictures of YGOPRODeck first; the game's own server only has 177x254 pictures
+							imageDownloader->AddDownloadResource({ "https://images.ygoprodeck.com/images/cards/{}.jpg", imgType::ART });
 							imageDownloader->AddDownloadResource({ DEFAULT_PIC_URL, imgType::ART });
 #else
 							continue;

@@ -1050,6 +1050,20 @@ void ImageManager::BuildLocalPictureIndex() {
 	local_index_dirs = mainGame->pic_dirs.size();
 	local_index_ready = true;
 }
+bool ImageManager::LocalPictureSize(uint32_t code, uint64_t& size) const {
+	if(!local_index_ready)
+		return false;
+	std::shared_lock<std::shared_mutex> lock(local_index_mutex);
+	const auto it = local_pictures.find(code);
+	if(it == local_pictures.end())
+		return false;
+	size = it->second.size;
+	return true;
+}
+void ImageManager::ReloadLocalPictures() {
+	BuildLocalPictureIndex();
+	ClearTexture(false);
+}
 void ImageManager::EnsureLocalPictureIndex() {
 	if(!local_index_ready || local_index_dirs != mainGame->pic_dirs.size())
 		BuildLocalPictureIndex();

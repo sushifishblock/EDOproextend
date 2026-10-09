@@ -141,6 +141,10 @@ public:
 	//builds (again, when the picture folders changed) the list of the pictures that exist on disk with their size and
 	//modification time, so that asking for a picture does not need any file system call
 	void EnsureLocalPictureIndex();
+	//size of the local picture file of a card, from the index only (false: no picture)
+	bool LocalPictureSize(uint32_t code, uint64_t& size) const;
+	//pictures were added or replaced on disk: look at the folders again and reload the card art
+	void ReloadLocalPictures();
 	//writes what is still buffered of the picture cache to disk
 	void FlushCardCache();
 	void WritePreloadProfile();

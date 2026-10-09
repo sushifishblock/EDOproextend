@@ -2,6 +2,7 @@
 #include <irrlicht.h>
 #include "game.h"
 #include "genesys.h"
+#include "repo_manager.h"
 #include "materials.h"
 #include "client_card.h"
 #include "deck_manager.h"
@@ -1521,7 +1522,98 @@ void Game::DrawDeckBd() {
 	if(deckBuilder.is_draging)
 		DrawThumb(deckBuilder.dragging_pointer, irr::core::vector2di(deckBuilder.dragx - Scale(CARD_THUMB_WIDTH / 2), deckBuilder.dragy - Scale(CARD_THUMB_HEIGHT / 2)), deckBuilder.filterList, true);
 }
+//Before the game can be used every official card needs its high resolution picture (813x1185). Pictures that are missing or
+//only low resolution are downloaded in bulk; the screen is locked until that is done. Returns true while it is running.
+bool Game::UpdateArtSync() {
+	if(artSync) {
+		const bool done = artSync->Finished() || artSyncSkip;
+		if(!done) {
+			//keep the blocker on top of everything
+			const auto size = driver->getScreenSize();
+			stArtSyncBlock->setRelativePosition(irr::core::recti(0, 0, size.Width, size.Height));
+			if(!stArtSyncBlock->isVisible())
+				env->setFocus(stArtSyncBlock);
+			stArtSyncBlock->setVisible(true);
+			env->getRootGUIElement()->bringToFront(stArtSyncBlock);
+			btnArtSyncContinue->setVisible(artSync->Offline());
+			if(artSync->Offline())
+				env->getRootGUIElement()->bringToFront(btnArtSyncContinue);
+			return true;
+		}
+		stArtSyncBlock->setVisible(false);
+		btnArtSyncContinue->setVisible(false);
+		const bool changed = artSync->Downloaded() > 0;
+		artSync.reset();
+		artSyncSkip = false;
+		if(changed)
+			imageManager.ReloadLocalPictures();
+		return false;
+	}
+	if(dInfo.isInDuel || gDataManager->cards.empty() || gRepoManager->GetUpdatingReposNumber() > 0)
+		return false;
+	if(artSyncRan && artSyncCardCount == gDataManager->cards.size())
+		return false;
+	artSyncRan = true;
+	artSyncCardCount = gDataManager->cards.size();
+	imageManager.EnsureLocalPictureIndex();
+	std::vector<std::pair<uint32_t, uint64_t>> cards;
+	for(const auto& entry : gDataManager->cards) {
+		const auto& data = entry.second._data;
+		if(!(data.ot & SCOPE_OCG_TCG) || (data.ot & (SCOPE_RUSH | SCOPE_SPEED | SCOPE_HIDDEN)) || (data.type & TYPE_TOKEN))
+			continue;
+		uint64_t size = UINT64_MAX;
+		imageManager.LocalPictureSize(entry.first, size);
+		cards.emplace_back(entry.first, size);
+	}
+	auto jobs = ArtSync::FindJobs(cards);
+	//for testing: EDOPRO_ARTSYNC_LIMIT=300 only downloads that many pictures
+	if(const char* limit = std::getenv("EDOPRO_ARTSYNC_LIMIT"); limit && std::atoi(limit) > 0 && jobs.size() > static_cast<size_t>(std::atoi(limit)))
+		jobs.resize(static_cast<size_t>(std::atoi(limit)));
+	if(jobs.empty())
+		return false;
+	artSync = std::make_unique<ArtSync>(std::move(jobs));
+	return true;
+}
+void Game::DrawArtSync() {
+	if(!artSync)
+		return;
+	const auto size = driver->getScreenSize();
+	driver->draw2DRectangle(0xff0b0f1e, irr::core::recti(0, 0, size.Width, size.Height));
+	const auto total = artSync->Total();
+	const auto processed = std::min(artSync->Processed(), total);
+	const double elapsed = std::max(0.001, artSync->ElapsedSeconds());
+	const double per_second = processed / elapsed;
+	DrawShadowText(numFont, L"Downloading card art", Resize(0, 150, 1024, 190), Resize(1, 1, 1, 1), 0xffffd54a, 0xff000000, true, true);
+	DrawShadowText(textFont, L"High resolution pictures (813x1185) are downloaded once. The game opens when they are all here.", Resize(0, 195, 1024, 220), Resize(1, 1, 1, 1), 0xffffffff, 0xff000000, true, true);
+	const int bar_l = 212, bar_r = 812, bar_t = 270, bar_b = 300;
+	driver->draw2DRectangle(0xff303040, Resize(bar_l, bar_t, bar_r, bar_b));
+	const int fill = total ? static_cast<int>((bar_r - bar_l) * processed / total) : 0;
+	if(fill > 0)
+		driver->draw2DRectangle(0xffffd54a, Resize(bar_l, bar_t, bar_l + fill, bar_b));
+	driver->draw2DRectangleOutline(Resize(bar_l, bar_t, bar_r, bar_b), 0xffffffff);
+	DrawShadowText(numFont, epro::format(L"{}%", total ? processed * 100 / total : 100), Resize(bar_l, bar_t, bar_r, bar_b), Resize(1, 1, 1, 1), 0xffffffff, 0xff000000, true, true);
+	DrawShadowText(textFont, epro::format(L"{} of {} cards    {:.1f} MB downloaded", processed, total, artSync->Bytes() / 1048576.0), Resize(0, 315, 1024, 340), Resize(1, 1, 1, 1), 0xffffffff, 0xff000000, true, true);
+	std::wstring eta;
+	if(processed > 20 && per_second > 0.01) {
+		const int seconds = static_cast<int>((total - processed) / per_second);
+		eta = epro::format(L"{:.0f} cards per second    about {}:{:02} left", per_second, seconds / 60, seconds % 60);
+	} else {
+		eta = L"Starting...";
+	}
+	DrawShadowText(textFont, eta, Resize(0, 345, 1024, 370), Resize(1, 1, 1, 1), 0xffb0ffb0, 0xff000000, true, true);
+	if(artSync->NotOnServer() || artSync->Failed())
+		DrawShadowText(textFont, epro::format(L"{} cards are not on the picture server, {} failed (the game keeps what it has)", artSync->NotOnServer(), artSync->Failed()), Resize(0, 375, 1024, 400), Resize(1, 1, 1, 1), 0xffc0c0c0, 0xff000000, true, true);
+	if(artSync->Offline()) {
+		DrawShadowText(textFont, L"Can't reach the picture server. Check your internet connection (still trying).", Resize(0, 405, 1024, 430), Resize(1, 1, 1, 1), 0xffff5050, 0xff000000, true, true);
+		//the real (invisible) button below handles the click, this is how it looks
+		driver->draw2DRectangle(0xff303a5c, Resize(392, 440, 632, 476));
+		driver->draw2DRectangleOutline(Resize(392, 440, 632, 476), 0xffffffff);
+		DrawShadowText(textFont, L"No connection - continue anyway", Resize(392, 440, 632, 476), Resize(1, 1, 1, 1), 0xffffffff, 0xff000000, true, true);
+	}
+}
 void Game::UpdateArtPreload() {
+	if(UpdateArtSync())
+		return;
 	if(dInfo.isInDuel || gDataManager->cards.empty())
 		return;
 	ProfileScope update_scope(imageManager.profile.update_ns);

@@ -10,6 +10,7 @@
 #include "settings_window.h"
 #include "config.h"
 #include "ai_assistant.h"
+#include "art_sync.h"
 #include "common.h"
 #include "mysignal.h"
 #include <SColor.h>
@@ -209,6 +210,13 @@ struct main_menu_panel_elements {
 	std::vector<uint32_t> artPreloadCodes;
 	size_t artPreloadCursor = 0;
 	size_t thumbPreloadCursor = 0;
+	//downloading the high resolution card art before the game can be used
+	std::unique_ptr<ArtSync> artSync;
+	size_t artSyncCardCount = 0;
+	bool artSyncSkip = false;
+	bool artSyncRan = false;
+	irr::gui::IGUIStaticText* stArtSyncBlock = nullptr;
+	irr::gui::IGUIButton* btnArtSyncContinue = nullptr;
 	uint32_t artPreloadGeneration = 0xffffffffu;
 	irr::gui::IGUIButton* btnModeExit;
 	irr::gui::IGUIButton* btnCommitLogExit;
@@ -573,6 +581,7 @@ public:
 	void WaitFrameSignal(int frame, std::unique_lock<epro::mutex>& _lck);
 	void DrawThumb(const CardDataC* cp, irr::core::vector2di pos, LFList* lflist, bool drag = false, const irr::core::recti* cliprect = nullptr, bool loadimage = true);
 	void DrawDeckBd();
+	//(see UpdateArtSync)
 	void DrawGenesysTotals(const Deck& deck, const irr::core::recti& where);
 	void DrawGenesysBadge(const irr::core::recti& card, int points, const irr::core::recti* clip);
 	void DrawCardBrowser();
@@ -580,6 +589,8 @@ public:
 	void UpdateBrowserControls();
 	//loads the art of every card in the background from the moment the game starts
 	void UpdateArtPreload();
+	bool UpdateArtSync();
+	void DrawArtSync();
 	void DrawArtPreloadStatus();
 	int ArtPreloadPercent() const;
 	void ApplyBrowserTextSize();

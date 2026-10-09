@@ -8,6 +8,7 @@ The game itself is still EDOPro: card scripts, databases and the duel core belon
 
 - **Card Browser** - a "Card Browser" button on the main menu opens every card in one full-screen grid, with the same filters as the deck editor. Hover a card to preview it, click to pin it, double-click to add it, right-click to remove it. The `-`/`+` and `0`-`3` buttons set how many copies are in the deck, `A-`/`A+` change the text size, and the switch button jumps between the Card Browser and the Deck Editor.
 - **No grey loading cards** - all card art (full size) and the small deck editor pictures are preloaded when the game starts. A warm start takes about 3 seconds.
+- **High resolution art** - on startup the game checks every official card and bulk-downloads the 813x1185 picture from YGOPRODeck when it is missing or low resolution. A lock screen with a progress bar blocks the game until it is done (about 2 GB on a fresh install). Fast: many parallel connections, up to 600 requests per second, backs off by itself if the server pushes back.
 - **AI search** - type a request in plain English under the grid, for example `dragon monsters that do stuff in hand when added`, and press Ask AI. A local model (llama.cpp with Qwen2.5-3B and nomic embeddings) turns it into filters and ranks the cards by meaning. It runs on my PC, nothing is sent online.
 - **Genesys mode** - tick the Genesys box in the deck panel. Each card shows its point cost as a black tab, the deck shows a total out of 100 with a bar, every card is allowed 3 copies, and Link and Pendulum monsters are blocked. The point list is refreshed from YGOPRODeck every time the game starts (the game restarts once from the main menu if it changed).
 - **Most played sort** - "Most played" in the sort dropdown orders cards by competitive usage (YugiohMeta ranking, TCG first). It is refreshed at every start too.
@@ -26,7 +27,7 @@ The AI models and card art are not in this repository. If the `ai` folder is mis
 
 ## Installing (also for friends)
 
-Download `EDOproextend-1.0-x64-full.zip` from the [Releases](../../releases) page, extract the whole zip (do not run it from inside the zip viewer) and start `EDOPro.exe`. It is the normal EDOPro 41.0.2 game files with my 64-bit exe and a 64-bit `ocgcore.dll` already in place, so nothing else has to be installed. The first start needs internet (card data and pictures are downloaded by the game).
+Download `EDOproextend-1.1-x64-full.zip` from the [Releases](../../releases) page, extract the whole zip (do not run it from inside the zip viewer) and start `EDOPro.exe`. It is the normal EDOPro 41.0.2 game files with my 64-bit exe and a 64-bit `ocgcore.dll` already in place, so nothing else has to be installed. The first start needs internet (card data and pictures are downloaded by the game).
 
 To update only the mod later, replace `EDOPro.exe` with the one from `release/` in this repository.
 

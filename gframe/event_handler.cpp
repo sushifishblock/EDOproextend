@@ -1875,6 +1875,10 @@ bool ClientField::OnCommonEvent(const irr::SEvent& event, bool& stopPropagation)
 				mainGame->env->setFocus(mainGame->gSettings.window);
 				break;
 			}
+			case BUTTON_ART_SYNC_CONTINUE: {
+				mainGame->artSyncSkip = true;
+				break;
+			}
 			case BUTTON_APPLY_RESTART: {
 				try {
 					gGameConfig->dpi_scale = static_cast<uint32_t>(std::stol(mainGame->gSettings.ebDpiScale->getText())) / 100.0;

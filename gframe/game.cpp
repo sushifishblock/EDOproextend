@@ -573,6 +573,10 @@ void Game::Initialize() {
 	defaultStrings.emplace_back(btnSortDeck, 1305);
 	btnClearDeck = AlignElementWithParent(env->addButton(Scale(155, 95, 220, 120), wDeckEdit, BUTTON_CLEAR_DECK, gDataManager->GetSysString(1304).data()));
 	defaultStrings.emplace_back(btnClearDeck, 1304);
+	stArtSyncBlock = env->addStaticText(L"", irr::core::recti(0, 0, 4000, 4000), false, false, 0, -1, false);
+	stArtSyncBlock->setVisible(false);
+	btnArtSyncContinue = AlignElementWithParent(env->addButton(Scale(392, 440, 632, 476), 0, BUTTON_ART_SYNC_CONTINUE, L"No connection - continue anyway"));
+	btnArtSyncContinue->setVisible(false);
 	Genesys::Load();
 	Genesys::enabled = gGameConfig->genesysMode && Genesys::HasList();
 	Genesys::StartUpdate();
@@ -2194,6 +2198,7 @@ bool Game::MainLoop() {
 		DrawGUI();
 		DrawSpec();
 		DrawArtPreloadStatus();
+		DrawArtSync();
 		if(cardimagetextureloading) {
 			ShowCardInfo(showingcard);
 		}
