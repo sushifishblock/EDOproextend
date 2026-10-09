@@ -26,9 +26,9 @@ The AI models and card art are not in this repository. If the `ai` folder is mis
 
 ## Installing (also for friends)
 
-This is a mod, not a full game: it needs a normal [EDOPro](https://projectignis.github.io) install for the scripts, databases and pictures. Download `EDOproextend-1.0-x64.zip` from the [Releases](../../releases) page and follow `INSTALL.txt` inside it: copy `EDOPro.exe` **and** `ocgcore.dll` into the EDOPro folder and replace `config/configs.json`. Without `ocgcore.dll` next to the exe the game stops with "ocgcore.dll was not found".
+Download `EDOproextend-1.0-x64-full.zip` from the [Releases](../../releases) page, extract the whole zip (do not run it from inside the zip viewer) and start `EDOPro.exe`. It is the normal EDOPro 41.0.2 game files with my 64-bit exe and a 64-bit `ocgcore.dll` already in place, so nothing else has to be installed. The first start needs internet (card data and pictures are downloaded by the game).
 
-To go back, put the old `EDOPro.exe` back (keep a copy as `EDOPro.previous.exe`).
+To update only the mod later, replace `EDOPro.exe` with the one from `release/` in this repository.
 
 ## Building
 
