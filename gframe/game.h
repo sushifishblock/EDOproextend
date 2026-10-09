@@ -215,6 +215,19 @@ struct main_menu_panel_elements {
 	size_t thumbPreloadCursor = 0;
 	uint32_t browserRarityTarget = 0;
 	int rarityUiMode = 0;
+	uint32_t rarityLockCode = 0; //Z in the deck editor locks the rarity picker onto the hovered card (and copy)
+	int rarityLockOrdinal = -1;
+	bool rarityLockToggle = false;
+	int rarityCopyOrdinal = -1; //which copy of the shown card in the deck the rarity picker works on
+	uint64_t rarityUiSig = 0;
+	int thumbRarityOverride = -1;
+	irr::gui::IGUICheckBox* chkRarityDeck = nullptr;
+	irr::gui::IGUICheckBox* chkRarityCopy = nullptr;
+	irr::gui::IGUIStaticText* stRarityHint = nullptr;
+	irr::gui::IGUIButton* btnRarityResetDeck = nullptr;
+	irr::gui::IGUIButton* btnRarityResetAll = nullptr;
+	int rarityResetArmed = 0; //1 = reset deck, 2 = reset all: waiting for the second click
+	unsigned rarityResetArmTime = 0;
 	uint32_t posSelectCode = 0;
 	//downloading the high resolution card art before the game can be used
 	std::unique_ptr<ArtSync> artSync;
@@ -223,6 +236,15 @@ struct main_menu_panel_elements {
 	bool artSyncRan = false;
 	irr::gui::IGUIStaticText* stArtSyncBlock = nullptr;
 	irr::gui::IGUIButton* btnArtSyncContinue = nullptr;
+	irr::gui::IGUIButton* btnModUpdate = nullptr;
+	irr::gui::IGUIButton* btnDeckStats = nullptr;
+	irr::gui::IGUIButton* btnDeckDiff = nullptr;
+	irr::gui::IGUIWindow* wDeckStats = nullptr;
+	irr::gui::IGUIWindow* wDeckDiff = nullptr;
+	irr::gui::IGUIComboBox* cbDeckDiff = nullptr;
+	irr::gui::IGUIListBox* lstDeckDiff = nullptr;
+	std::wstring modUpdateLabel;
+	bool modUpdateLaunched = false;
 	uint32_t artPreloadGeneration = 0xffffffffu;
 	irr::gui::IGUIButton* btnModeExit;
 	irr::gui::IGUIButton* btnCommitLogExit;
@@ -565,6 +587,8 @@ public:
 	bool MainLoop();
 	bool ApplySkin(const epro::path_string& skin, bool reload = false, bool firstrun = false);
 	void RefreshDeck(irr::gui::IGUIComboBox* cbDeck);
+	void DrawDeckTools();
+	void RefreshDeckDiff();
 	void RefreshLFLists();
 	void RefreshAiDecks();
 	void RefreshReplay();

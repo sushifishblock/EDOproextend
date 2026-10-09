@@ -2,6 +2,7 @@
 #include <irrlicht.h>
 #include "game.h"
 #include "genesys.h"
+#include "deck_tools.h"
 #include "rarity.h"
 #include "repo_manager.h"
 #include "materials.h"
@@ -351,6 +352,29 @@ void Game::DrawCards() {
 			DrawCard(dField.skills[p]);
 	}
 }
+static Rarity DuelCardRarity(const ClientCard* card) {
+	if(card->rarity_slot < 0 || card->rarity_code != card->code) {
+		card->rarity_slot = static_cast<int>(RarityFx::TakeDuelRarity(card->code));
+		card->rarity_code = card->code;
+	}
+	return static_cast<Rarity>(card->rarity_slot);
+}
+//which copy (counting main, extra, side in order) of its card a deck entry is
+static int DeckCopyOrdinal(const Deck& deck, int pile, int index) {
+	const Deck::Vector* piles[3] = { &deck.main, &deck.extra, &deck.side };
+	if(pile < 0 || pile > 2 || index < 0 || static_cast<size_t>(index) >= piles[pile]->size())
+		return -1;
+	const auto real = (*piles[pile])[index]->getRealCode();
+	int ordinal = 0;
+	for(int p = 0; p <= pile; ++p) {
+		const size_t end = p == pile ? static_cast<size_t>(index) : piles[p]->size();
+		for(size_t i = 0; i < end; ++i)
+			if((*piles[p])[i]->getRealCode() == real)
+				++ordinal;
+	}
+	return ordinal;
+}
+
 void Game::DrawCard(ClientCard* pcard) {
 	if(pcard->aniFrame > 0) {
 		uint32_t movetime = std::min<uint32_t>(delta_time, pcard->aniFrame);
@@ -381,8 +405,20 @@ void Game::DrawCard(ClientCard* pcard) {
 		driver->drawVertexPrimitiveList(matManager.vCardFront, 4, matManager.iRectangle, 2);
 		//only my own cards are foil, not the same card of the opponent
 		if(pcard->code && pcard->controler == 0) {
-			if(const auto rarity = RarityFx::Get(pcard->code); rarity != Rarity::NORMAL)
-				RarityFx::Draw3D(driver, matManager.mRarity, rarity, device->getTimer()->getTime(), static_cast<uint32_t>(std::clamp(std::round(pcard->curAlpha), 0.0f, 255.0f)));
+			const auto now = static_cast<long long>(device->getTimer()->getTime());
+			//one of my cards arriving on the field face up gets a shine
+			if(pcard->shine_location != pcard->location) {
+				if(pcard->shine_location != 0 && (pcard->location & (LOCATION_MZONE | LOCATION_SZONE)) && (pcard->position & POS_FACEUP))
+					pcard->shine_start = now;
+				pcard->shine_location = pcard->location;
+			}
+			const auto alpha = static_cast<uint32_t>(std::clamp(std::round(pcard->curAlpha), 0.0f, 255.0f));
+			if(const auto rarity = DuelCardRarity(pcard); rarity != Rarity::NORMAL) {
+				RarityFx::Draw3D(driver, matManager.mRarity, rarity, device->getTimer()->getTime(), alpha);
+				const long long age = now - pcard->shine_start;
+				if(age >= 0 && age < 1000)
+					RarityFx::DrawShine3D(driver, matManager.mRarity, age / 1000.0f, alpha);
+			}
 		}
 	}
 	if(m22 < 0.99 || pcard->is_moving) {
@@ -1212,9 +1248,11 @@ void Game::DrawThumb(const CardDataC* cp, irr::core::vector2di pos, LFList* lfli
 	}
 	driver->draw2DImage(img, dragloc, irr::core::recti(0, 0, size.Width, size.Height), cliprect);
 	if(load_image) {
-		if(const auto rarity = RarityFx::Get(code); rarity != Rarity::NORMAL)
+		const auto rarity = thumbRarityOverride >= 0 ? static_cast<Rarity>(thumbRarityOverride) : RarityFx::GetFor(code, -1);
+		if(rarity != Rarity::NORMAL)
 			RarityFx::Draw2D(driver, dragloc, rarity, device->getTimer()->getTime(), cliprect);
 	}
+	thumbRarityOverride = -1;
 	if(Genesys::enabled) {
 		if(const int pts = Genesys::Points(cp); pts > 0 && !Genesys::Illegal(cp)) {
 			DrawGenesysBadge(dragloc, pts, cliprect);
@@ -1343,6 +1381,18 @@ void Game::DrawDeckBd() {
 		return epro::to_wstring(deck.size());
 	};
 	const auto& current_deck = deckBuilder.GetCurrentDeck();
+	//the rarity of every copy in the deck (copies of a card are counted main, extra, side)
+	std::vector<int> rarity_of[3];
+	{
+		std::map<uint32_t, int> seen;
+		const Deck::Vector* piles[3] = { &current_deck.main, &current_deck.extra, &current_deck.side };
+		for(int p = 0; p < 3; ++p) {
+			for(const auto* card : *piles[p]) {
+				const auto real = card->getRealCode();
+				rarity_of[p].push_back(static_cast<int>(RarityFx::GetFor(real, seen[real]++)));
+			}
+		}
+	}
 
 	//main deck
 	{
@@ -1374,6 +1424,7 @@ void Game::DrawDeckBd() {
 		const float dx = 436.0f / (cards_per_row - 1);
 
 		for(int i = 0; i < static_cast<int>(current_deck.main.size()); ++i) {
+			thumbRarityOverride = rarity_of[0][i];
 			DrawThumb(current_deck.main[i], irr::core::vector2di(314 + (i % cards_per_row) * dx, 164 + (i / cards_per_row) * 68), deckBuilder.filterList);
 			if(deckBuilder.hovered_pos == 1 && deckBuilder.hovered_seq == i)
 				driver->draw2DRectangleOutline(Resize(313 + (i % cards_per_row) * dx, 163 + (i / cards_per_row) * 68, 359 + (i % cards_per_row) * dx, 228 + (i / cards_per_row) * 68), skin::DECK_WINDOW_HOVERED_CARD_OUTLINE_VAL);
@@ -1409,6 +1460,7 @@ void Game::DrawDeckBd() {
 		const float dx = (current_deck.extra.size() <= 10) ? (436.0f / 9.0f) : (436.0f / (current_deck.extra.size() - 1));
 
 		for(size_t i = 0; i < current_deck.extra.size(); ++i) {
+			thumbRarityOverride = rarity_of[1][i];
 			DrawThumb(current_deck.extra[i], irr::core::vector2di(314 + i * dx, 466), deckBuilder.filterList);
 			if(deckBuilder.hovered_pos == 2 && deckBuilder.hovered_seq == (int)i)
 				driver->draw2DRectangleOutline(Resize(313 + i * dx, 465, 359 + i * dx, 531), skin::DECK_WINDOW_HOVERED_CARD_OUTLINE_VAL);
@@ -1441,6 +1493,7 @@ void Game::DrawDeckBd() {
 		const float dx = (current_deck.side.size() <= 10) ? (436.0f / 9.0f) : (436.0f / (current_deck.side.size() - 1));
 
 		for(size_t i = 0; i < current_deck.side.size(); ++i) {
+			thumbRarityOverride = rarity_of[2][i];
 			DrawThumb(current_deck.side[i], irr::core::vector2di(314 + i * dx, 564), deckBuilder.filterList);
 			if(deckBuilder.hovered_pos == 3 && deckBuilder.hovered_seq == (int)i)
 				driver->draw2DRectangleOutline(Resize(313 + i * dx, 563, 359 + i * dx, 629), skin::DECK_WINDOW_HOVERED_CARD_OUTLINE_VAL);
@@ -1600,7 +1653,7 @@ void Game::DrawRarityPreview() {
 		const auto overlay = [&](irr::gui::IGUIButton* button, const ClientCard* card, const irr::core::recti& clip) {
 			if(!card || !card->code || card->controler != 0 || !button->isVisible())
 				return;
-			if(const auto rarity = RarityFx::Get(card->code); rarity != Rarity::NORMAL)
+			if(const auto rarity = DuelCardRarity(card); rarity != Rarity::NORMAL)
 			{
 				//the card picture is a little smaller than its button
 				const auto box = button->getAbsolutePosition();
@@ -1647,27 +1700,88 @@ void Game::DrawRarityPreview() {
 	}
 	//the rarity picker: in the card browser it follows the hovered card, in the deck editor the card shown in the info panel
 	const int mode = deckBuilder.browser_mode ? 1 : (is_building || is_siding) ? 2 : 0;
-	if(mode == 2 && showingcard != browserRarityTarget) {
-		browserRarityTarget = showingcard;
-		cbBrowserRarity->setSelected(static_cast<int>(RarityFx::Get(showingcard)));
+	if(mode != 0) {
+		//the deck whose rarities are being edited (the one in the editor, or the one used in the duel while siding)
+		std::wstring deck_name;
+		if(is_siding)
+			deck_name = RarityFx::DuelName();
+		else if(const int sel = cbDBDecks->getSelected(); sel >= 0)
+			deck_name = cbDBDecks->getItem(sel);
+		RarityFx::EditDeck(deck_name);
+	}
+	if(rarityResetArmed && device->getTimer()->getTime() - rarityResetArmTime > 4000) {
+		rarityResetArmed = 0;
+		btnRarityResetDeck->setText(L"Reset deck");
+		btnRarityResetAll->setText(L"Reset all");
+	}
+	if(mode != 2)
+		rarityLockCode = 0;
+	if(mode == 2) {
+		const auto& deck = deckBuilder.GetCurrentDeck();
+		const int pile = deckBuilder.hovered_pos - 1;
+		if(rarityLockToggle) {
+			//Z: lock the picker onto the hovered card (this very copy), Z again unlocks
+			rarityLockToggle = false;
+			if(rarityLockCode) {
+				rarityLockCode = 0;
+			} else if(deckBuilder.hovered_code) {
+				rarityLockCode = deckBuilder.hovered_code;
+				rarityLockOrdinal = pile >= 0 && pile <= 2 ? DeckCopyOrdinal(deck, pile, deckBuilder.hovered_seq) : -1;
+				if(showingcard != rarityLockCode)
+					ShowCardInfo(rarityLockCode);
+			}
+			stBrowserRarity->setText(rarityLockCode ? L"Locked" : L"Rarity");
+			stBrowserRarity->setOverrideColor(rarityLockCode ? 0xff80ff80 : 0xffffd54a);
+		}
+		if(rarityLockCode) {
+			rarityCopyOrdinal = rarityLockOrdinal;
+		} else if(pile >= 0 && pile <= 2 && deckBuilder.hovered_code == showingcard) {
+			//the copy of the shown card the picker works on: the deck card the mouse was last on
+			rarityCopyOrdinal = DeckCopyOrdinal(deck, pile, deckBuilder.hovered_seq);
+		} else if(deckBuilder.hovered_pos == 4 && deckBuilder.hovered_code == showingcard) {
+			rarityCopyOrdinal = -1;
+		}
+	} else if(rarityLockToggle) {
+		rarityLockToggle = false;
+	}
+	if(mode != 0) {
+		const uint64_t sig = (((static_cast<uint64_t>(rarityLockCode ? rarityLockCode : showingcard)) << 8) ^ (static_cast<uint64_t>(rarityCopyOrdinal + 1) << 40) ^ (RarityFx::DeckMode() ? 1 : 0) ^ (RarityFx::PerCopy() ? 2 : 0) ^ (static_cast<uint64_t>(mode) << 4)) | 0x8000000000000000ull;
+		if(sig != rarityUiSig) {
+			rarityUiSig = sig;
+			chkRarityDeck->setChecked(RarityFx::DeckMode());
+			chkRarityCopy->setChecked(RarityFx::PerCopy());
+			chkRarityCopy->setEnabled(RarityFx::DeckMode() && mode == 2);
+			if(mode == 2)
+				cbBrowserRarity->setSelected(static_cast<int>(RarityFx::GetFor(rarityLockCode ? rarityLockCode : showingcard, rarityCopyOrdinal)));
+		}
 	}
 	if(mode != rarityUiMode) {
 		rarityUiMode = mode;
 		stBrowserRarity->setVisible(mode != 0);
 		cbBrowserRarity->setVisible(mode != 0);
+		chkRarityDeck->setVisible(mode != 0);
+		chkRarityCopy->setVisible(mode != 0);
+		stRarityHint->setVisible(mode == 2);
+		btnRarityResetDeck->setVisible(mode != 0);
+		btnRarityResetAll->setVisible(mode != 0);
+		rarityUiSig = 0;
 		RefreshCardInfoTextPositions();
 	}
 	if(!showingcard || !imgCard->isVisible() || !wCardImg->isVisible())
 		return;
-	const auto rarity = RarityFx::Get(showingcard);
+	auto rarity = mode == 2 ? RarityFx::GetFor(showingcard, rarityCopyOrdinal) : RarityFx::GetFor(showingcard, -1);
+	if(dInfo.isInDuel) {
+		rarity = RarityFx::Get(showingcard);
+		const ClientCard* shown = dField.hovered_card ? dField.hovered_card : dField.clicked_card;
+		if(shown && shown->code == showingcard) {
+			//a card of the opponent is shown without the effect, my own with the rarity of its copy
+			if(shown->controler != 0)
+				return;
+			rarity = DuelCardRarity(shown);
+		}
+	}
 	if(rarity == Rarity::NORMAL)
 		return;
-	if(dInfo.isInDuel) {
-		//a card of the opponent is shown without the effect
-		const ClientCard* shown = dField.hovered_card ? dField.hovered_card : dField.clicked_card;
-		if(shown && shown->code == showingcard && shown->controler != 0)
-			return;
-	}
 	RarityFx::Draw2D(driver, imgCard->getAbsolutePosition(), rarity, device->getTimer()->getTime(), nullptr);
 }
 void Game::DrawArtSync() {
@@ -1853,7 +1967,7 @@ void Game::UpdateBrowserControls() {
 		copies = deckBuilder.CountCopies(cd);
 		if(cd->code != browserRarityTarget) {
 			browserRarityTarget = cd->code;
-			cbBrowserRarity->setSelected(static_cast<int>(RarityFx::Get(cd->code)));
+			cbBrowserRarity->setSelected(static_cast<int>(RarityFx::GetFor(cd->code, -1)));
 		}
 		const bool extra = (cd->type & (TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ)) || (cd->type & (TYPE_LINK | TYPE_SPELL)) == TYPE_LINK;
 		label = epro::format(L"In deck: {} of {} ({})", copies, deckBuilder.GetCardLimit(cd), deckBuilder.browser_add_to_side ? L"Side" : extra ? L"Extra" : L"Main");
@@ -1932,7 +2046,7 @@ void Game::DrawCardBrowser() {
 			}
 			const auto size = img->getOriginalSize();
 			driver->draw2DImage(img, cell, irr::core::recti(0, 0, size.Width, size.Height), &clip);
-			if(const auto rarity = RarityFx::Get(ptr->code); rarity != Rarity::NORMAL)
+			if(const auto rarity = RarityFx::GetFor(ptr->code, -1); rarity != Rarity::NORMAL)
 				RarityFx::Draw2D(driver, cell, rarity, device->getTimer()->getTime(), &clip);
 			//ban list marker
 			const int limit = deckBuilder.GetCardLimit(ptr);
@@ -1990,4 +2104,80 @@ void Game::DrawCardBrowser() {
 #undef DRAWRECT
 #undef DECKCOLOR
 #undef SKCOLOR
+void Game::DrawDeckTools() {
+	if(!wDeckStats || !wDeckStats->isVisible())
+		return;
+	const auto s = DeckStats::Compute(deckBuilder.GetCurrentDeck());
+	const auto win = wDeckStats->getAbsolutePosition();
+	const float sx = win.getWidth() / 560.0f, sy = win.getHeight() / 540.0f;
+	const auto R = [&](int x0, int y0, int x1, int y1) {
+		return irr::core::recti(win.UpperLeftCorner.X + static_cast<int>(x0 * sx), win.UpperLeftCorner.Y + static_cast<int>(y0 * sy),
+								win.UpperLeftCorner.X + static_cast<int>(x1 * sx), win.UpperLeftCorner.Y + static_cast<int>(y1 * sy));
+	};
+	const auto text = [&](const std::wstring& t, int x0, int y0, int x1, int y1, uint32_t color = 0xffffffff, bool center = false) {
+		DrawShadowText(textFont, t, R(x0, y0, x1, y1), irr::core::recti{ 1, 1, 1, 1 }, color, 0xff000000, center, true);
+	};
+	const auto bar = [&](int x, int y, int w, int h, double fraction, uint32_t color) {
+		driver->draw2DRectangle(0x80000000, R(x, y, x + w, y + h));
+		const int fill = static_cast<int>(w * std::min(1.0, std::max(0.0, fraction)));
+		if(fill > 0)
+			driver->draw2DRectangle(color, R(x, y, x + fill, y + h));
+		driver->draw2DRectangleOutline(R(x, y, x + w, y + h), 0x60ffffff);
+	};
+	const auto num = [](int v) { return std::to_wstring(v); };
+	const double total = std::max(1, s.main_total);
+	text(L"Main deck: " + num(s.main_total) + L" cards      Extra deck: " + num(s.extra_total) + L"      Side deck: " + num(s.side_total), 15, 30, 545, 50, 0xffffffff);
+	//card types
+	const std::pair<const wchar_t*, std::pair<int, uint32_t>> rows[3] = { { L"Monsters", { s.monsters, 0xffd08030 } }, { L"Spells", { s.spells, 0xff30a080 } }, { L"Traps", { s.traps, 0xffa04080 } } };
+	for(int i = 0; i < 3; ++i) {
+		const int y = 58 + i * 20;
+		text(rows[i].first, 15, y, 100, y + 18, 0xffffffff);
+		bar(105, y + 2, 330, 14, rows[i].second.first / total, rows[i].second.second);
+		text(num(rows[i].second.first), 440, y, 500, y + 18, 0xffffffff);
+	}
+	text(L"Monsters:  Normal " + num(s.mon_normal) + L", Effect " + num(s.mon_effect) + L", Ritual " + num(s.mon_ritual) + L", Pendulum " + num(s.mon_pendulum) + L", Tuner " + num(s.mon_tuner), 15, 122, 545, 140, 0xffd0d0d0);
+	text(L"Spells:  Normal " + num(s.spell_normal) + L", Quick-Play " + num(s.spell_quick) + L", Continuous " + num(s.spell_continuous) + L", Equip " + num(s.spell_equip) + L", Field " + num(s.spell_field) + L", Ritual " + num(s.spell_ritual), 15, 140, 545, 158, 0xffd0d0d0);
+	text(L"Traps:  Normal " + num(s.trap_normal) + L", Continuous " + num(s.trap_continuous) + L", Counter " + num(s.trap_counter), 15, 158, 545, 176, 0xffd0d0d0);
+	text(L"Extra deck:  Fusion " + num(s.extra_fusion) + L", Synchro " + num(s.extra_synchro) + L", Xyz " + num(s.extra_xyz) + L", Link " + num(s.extra_link), 15, 176, 545, 194, 0xffd0d0d0);
+	//level curve
+	{
+		wchar_t avg[16];
+		swprintf(avg, 16, L"%.1f", s.average_level);
+		text(L"Monster levels / ranks   (average level " + std::wstring(avg) + L")", 15, 204, 545, 222, 0xffffd060);
+		int highest = 1;
+		for(int i = 1; i <= 13; ++i)
+			highest = std::max(highest, s.levels[i]);
+		for(int i = 1; i <= 13; ++i) {
+			const int x = 15 + (i - 1) * 40;
+			const int h = static_cast<int>(70.0 * s.levels[i] / highest);
+			driver->draw2DRectangle(0x50000000, R(x, 244, x + 34, 314));
+			if(h > 0)
+				driver->draw2DRectangle(0xffe0a040, R(x, 314 - h, x + 34, 314));
+			if(s.levels[i])
+				text(num(s.levels[i]), x, 314 - h - 16, x + 34, 314 - h, 0xffffffff, true);
+			text(i == 13 ? L"13+" : num(i), x, 316, x + 34, 332, 0xffd0d0d0, true);
+		}
+	}
+	//attributes and types
+	text(L"Attributes", 15, 342, 270, 360, 0xffffd060);
+	const uint32_t attribute_colors[7] = { 0xffa07040, 0xff4090e0, 0xffe05030, 0xff40c060, 0xffe8e060, 0xffa050c0, 0xffe0c040 };
+	int max_attribute = 1;
+	for(const int v : s.attributes)
+		max_attribute = std::max(max_attribute, v);
+	for(int i = 0; i < 7; ++i) {
+		const int y = 362 + i * 18;
+		text(gDataManager->FormatAttribute(1u << i), 15, y, 90, y + 16, 0xffffffff);
+		bar(95, y + 2, 140, 12, static_cast<double>(s.attributes[i]) / max_attribute, attribute_colors[i]);
+		text(num(s.attributes[i]), 240, y, 275, y + 16, 0xffffffff);
+	}
+	text(L"Monster types", 285, 342, 545, 360, 0xffffd060);
+	const int max_race = s.races.empty() ? 1 : s.races.front().first;
+	for(size_t i = 0; i < 7 && i < s.races.size(); ++i) {
+		const int y = 362 + static_cast<int>(i) * 18;
+		text(gDataManager->FormatRace(s.races[i].second), 285, y, 385, y + 16, 0xffffffff);
+		bar(390, y + 2, 120, 12, static_cast<double>(s.races[i].first) / max_race, 0xff6090d0);
+		text(num(s.races[i].first), 515, y, 548, y + 16, 0xffffffff);
+	}
+}
+
 }

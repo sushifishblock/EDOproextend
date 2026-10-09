@@ -10,6 +10,8 @@
 #include "genesys.h"
 #include "rarity.h"
 #include "popularity.h"
+#include "mod_updater.h"
+#include "deck_tools.h"
 #include "server_lobby.h"
 #include "sound_manager.h"
 #include "image_manager.h"
@@ -578,6 +580,25 @@ void Game::Initialize() {
 	stArtSyncBlock->setVisible(false);
 	btnArtSyncContinue = AlignElementWithParent(env->addButton(Scale(392, 440, 632, 476), 0, BUTTON_ART_SYNC_CONTINUE, L"No connection - continue anyway"));
 	btnArtSyncContinue->setVisible(false);
+	btnModUpdate = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 492, mainMenuRightX + 40, 524), 0, BUTTON_MOD_UPDATE, L""));
+	btnModUpdate->setVisible(false);
+	btnDeckStats = AlignElementWithParent(env->addButton(Scale(450, 538, 520, 556), 0, BUTTON_DECK_STATS, L"Stats"));
+	btnDeckDiff = AlignElementWithParent(env->addButton(Scale(525, 538, 595, 556), 0, BUTTON_DECK_DIFF, L"Compare"));
+	btnDeckStats->setVisible(false);
+	btnDeckDiff->setVisible(false);
+	wDeckStats = env->addWindow(Scale(232, 50, 792, 590), false, L"Deck statistics");
+	wDeckStats->getCloseButton()->setVisible(false);
+	wDeckStats->setVisible(false);
+	env->addButton(Scale(230, 505, 330, 530), wDeckStats, BUTTON_DECK_TOOLS_CLOSE, L"Close");
+	wDeckDiff = env->addWindow(Scale(232, 50, 792, 590), false, L"Compare decks");
+	wDeckDiff->getCloseButton()->setVisible(false);
+	wDeckDiff->setVisible(false);
+	env->addStaticText(L"Compare this deck with:", Scale(15, 32, 200, 54), false, false, wDeckDiff);
+	cbDeckDiff = env->addComboBox(Scale(200, 32, 545, 54), wDeckDiff, COMBOBOX_DECK_DIFF);
+	lstDeckDiff = env->addListBox(Scale(15, 62, 545, 495), wDeckDiff, -1, true);
+	env->addButton(Scale(230, 505, 330, 530), wDeckDiff, BUTTON_DECK_TOOLS_CLOSE, L"Close");
+	ModUpdater::CleanupOld();
+	ModUpdater::StartCheck();
 	RarityFx::Load();
 	Genesys::Load();
 	Genesys::enabled = gGameConfig->genesysMode && Genesys::HasList();
@@ -1501,6 +1522,17 @@ void Game::PopulateTabSettingsWindow() {
 		stBrowserCount->setTextAlignment(irr::gui::EGUIA_CENTER, irr::gui::EGUIA_CENTER);
 		btnBrowserPlus = env->addButton(Scale(89, 306, 115, 330), tabInfo, BUTTON_BROWSER_PLUS, L"+");
 		btnBrowserTarget = env->addButton(Scale(162, 280, 210, 300), tabInfo, BUTTON_BROWSER_TARGET, L"To Main");
+		chkRarityDeck = env->addCheckBox(false, irr::core::recti(0, 0, 10, 10), tabInfo, CHECKBOX_RARITY_DECK, L"Deck rarities");
+		chkRarityCopy = env->addCheckBox(false, irr::core::recti(0, 0, 10, 10), tabInfo, CHECKBOX_RARITY_COPY, L"Per copy");
+		chkRarityDeck->setVisible(false);
+		chkRarityCopy->setVisible(false);
+		btnRarityResetDeck = env->addButton(irr::core::recti(0, 0, 10, 10), tabInfo, BUTTON_RARITY_RESET_DECK, L"Reset deck");
+		btnRarityResetAll = env->addButton(irr::core::recti(0, 0, 10, 10), tabInfo, BUTTON_RARITY_RESET_ALL, L"Reset all");
+		btnRarityResetDeck->setVisible(false);
+		btnRarityResetAll->setVisible(false);
+		stRarityHint = env->addStaticText(L"Press Z to lock a card to change the rarity", irr::core::recti(0, 0, 10, 10), false, false, tabInfo);
+		stRarityHint->setOverrideColor(0xffb0b0b0);
+		stRarityHint->setVisible(false);
 		btnBrowserTarget->setIsPushButton(false);
 		stBrowserRarity = env->addStaticText(L"Rarity", Scale(15, 255, 60, 275), false, false, tabInfo);
 		stBrowserRarity->setOverrideColor(0xffffd54a);
@@ -2072,6 +2104,40 @@ bool Game::MainLoop() {
 		//a new Genesys point list was saved: restart (from the main menu only, never in the middle of a duel or a deck)
 		if(Popularity::ApplyUpdate() && is_building && cbSortType->getItemData(cbSortType->getSelected()) == DeckBuilder::SORT_MODIFIER_POPULARITY)
 			deckBuilder.StartFilter(false);
+		{
+			if(auto* cursor = device->getCursorControl()) {
+				const auto mouse = cursor->getPosition();
+				RarityFx::SetMouse(mouse.X, mouse.Y);
+			}
+			const bool tools = is_building && !is_siding && !deckBuilder.browser_mode;
+			if(btnDeckStats->isVisible() != tools) {
+				btnDeckStats->setVisible(tools);
+				btnDeckDiff->setVisible(tools);
+				if(!tools) {
+					wDeckStats->setVisible(false);
+					wDeckDiff->setVisible(false);
+				}
+			}
+		}
+		{
+			//one-click mod updater: the button shows up on the main menu when a newer release exists
+			const auto update_state = ModUpdater::GetState();
+			const bool show_update = update_state != ModUpdater::IDLE && update_state != ModUpdater::CHECKING && wMainMenu->isVisible();
+			if(show_update != btnModUpdate->isVisible())
+				btnModUpdate->setVisible(show_update);
+			if(show_update) {
+				const auto label = ModUpdater::Label();
+				if(label != modUpdateLabel) {
+					modUpdateLabel = label;
+					btnModUpdate->setText(label.data());
+				}
+			}
+			if(update_state == ModUpdater::RESTART && !modUpdateLaunched) {
+				modUpdateLaunched = true;
+				ModUpdater::LaunchNew();
+				device->closeDevice();
+			}
+		}
 		if(Genesys::RestartWanted() && wMainMenu->isVisible() && !dInfo.isStarted && !is_building)
 			restart = true;
 		if(ServerLobby::HasRefreshedRooms())
@@ -2206,6 +2272,7 @@ bool Game::MainLoop() {
 		UpdateArtPreload();
 		DrawGUI();
 		DrawSpec();
+		DrawDeckTools();
 		DrawRarityPreview();
 		DrawArtPreloadStatus();
 		DrawArtSync();
@@ -2974,7 +3041,7 @@ void Game::RefreshCardInfoTextPositions() {
 	offsetIfVisibleWithContent(stDataInfo);
 	offsetIfVisibleWithContent(stSetName);
 	offsetIfVisibleWithContent(stPasscodeScope);
-	const int reserved = deckBuilder.browser_mode ? ResizeY(86) : (is_building || is_siding) ? ResizeY(34) : Scale(1);
+	const int reserved = deckBuilder.browser_mode ? ResizeY(140) : (is_building || is_siding) ? ResizeY(106) : Scale(1);
 	stText->setRelativePosition(irr::core::recti(xLeft, offset, xRight, stText->getParent()->getAbsolutePosition().getHeight() - reserved));
 	if(deckBuilder.browser_mode) {
 		//keep the browser controls pinned to the bottom of the info tab
@@ -2985,8 +3052,12 @@ void Game::RefreshCardInfoTextPositions() {
 		const int h2 = ResizeY(26);
 		stBrowserCopies->setRelativePosition(irr::core::recti(ResizeX(15), row1, ResizeX(160), row1 + h1));
 		btnBrowserTarget->setRelativePosition(irr::core::recti(ResizeX(162), row1, ResizeX(210), row1 + h1));
-		stBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(15), row1 - ResizeY(23), ResizeX(50), row1 - ResizeY(2)));
-		cbBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(42), row1 - ResizeY(28), ResizeX(205), row1 - ResizeY(6)));
+		stBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(15), row1 - ResizeY(49), ResizeX(50), row1 - ResizeY(28)));
+		cbBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(42), row1 - ResizeY(54), ResizeX(205), row1 - ResizeY(32)));
+		btnRarityResetDeck->setRelativePosition(irr::core::recti(ResizeX(15), row1 - ResizeY(82), ResizeX(125), row1 - ResizeY(58)));
+		btnRarityResetAll->setRelativePosition(irr::core::recti(ResizeX(130), row1 - ResizeY(82), ResizeX(240), row1 - ResizeY(58)));
+		chkRarityDeck->setRelativePosition(irr::core::recti(ResizeX(15), row1 - ResizeY(28), ResizeX(125), row1 - ResizeY(6)));
+		chkRarityCopy->setRelativePosition(irr::core::recti(ResizeX(130), row1 - ResizeY(28), ResizeX(230), row1 - ResizeY(6)));
 		btnBrowserTextSmaller->setRelativePosition(irr::core::recti(ResizeX(215), row1, ResizeX(250), row1 + h1));
 		btnBrowserTextLarger->setRelativePosition(irr::core::recti(ResizeX(254), row1, ResizeX(289), row1 + h1));
 		btnBrowserMinus->setRelativePosition(irr::core::recti(ResizeX(15), row2, ResizeX(45), row2 + h2));
@@ -2997,9 +3068,14 @@ void Game::RefreshCardInfoTextPositions() {
 	} else if(is_building || is_siding) {
 		//deck editor: only the rarity picker, at the bottom of the info tab
 		const int height = stText->getParent()->getAbsolutePosition().getHeight();
-		const int row = height - ResizeY(30);
+		const int row = height - ResizeY(102);
 		stBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(15), row + ResizeY(5), ResizeX(50), row + ResizeY(27)));
 		cbBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(42), row, ResizeX(205), row + ResizeY(22)));
+		chkRarityDeck->setRelativePosition(irr::core::recti(ResizeX(15), row + ResizeY(26), ResizeX(125), row + ResizeY(48)));
+		chkRarityCopy->setRelativePosition(irr::core::recti(ResizeX(130), row + ResizeY(26), ResizeX(230), row + ResizeY(48)));
+		btnRarityResetDeck->setRelativePosition(irr::core::recti(ResizeX(15), row + ResizeY(50), ResizeX(125), row + ResizeY(74)));
+		btnRarityResetAll->setRelativePosition(irr::core::recti(ResizeX(130), row + ResizeY(50), ResizeX(240), row + ResizeY(74)));
+		stRarityHint->setRelativePosition(irr::core::recti(ResizeX(15), row + ResizeY(76), ResizeX(290), row + ResizeY(96)));
 	}
 }
 void Game::ClearCardInfo(int player) {
@@ -3774,6 +3850,8 @@ void Game::OnResize() {
 	SetCentered(updateWindow, false);
 
 	SetCentered(wYdkeManage, false);
+	SetCentered(wDeckStats, false);
+	SetCentered(wDeckDiff, false);
 	SetCentered(wHandTest, false);
 
 	wCategories->setRelativePosition(ResizeWin(450, 60, 1000, 270));
@@ -4154,6 +4232,34 @@ void Game::ApplyLocale(size_t index, bool forced) {
 	} else
 		gGameConfig->locale = EPRO_TEXT("en");
 	ReloadElementsStrings();
+}
+
+
+void Game::RefreshDeckDiff() {
+	lstDeckDiff->clear();
+	const int current = cbDBDecks->getSelected();
+	const std::wstring current_name = current >= 0 ? cbDBDecks->getItem(current) : L"";
+	int sel = cbDeckDiff->getSelected();
+	if(sel >= 0 && cbDeckDiff->getItem(sel) == current_name && cbDeckDiff->getItemCount() > 1)
+		sel = (sel + 1) % cbDeckDiff->getItemCount();
+	if(sel < 0 && cbDeckDiff->getItemCount() > 0)
+		sel = 0;
+	if(sel < 0) {
+		lstDeckDiff->addItem(L"There is no other saved deck to compare with.");
+		return;
+	}
+	cbDeckDiff->setSelected(sel);
+	const std::wstring name = cbDeckDiff->getItem(sel);
+	Deck other;
+	if(!DeckManager::LoadDeckFromFile(Utils::ToPathString(name), other, true)) {
+		lstDeckDiff->addItem(L"Could not load that deck.");
+		return;
+	}
+	const auto lines = DiffDecks(deckBuilder.GetCurrentDeck(), other, name);
+	for(size_t i = 0; i < lines.size(); ++i) {
+		lstDeckDiff->addItem(lines[i].text.data());
+		lstDeckDiff->setItemOverrideColor(static_cast<irr::u32>(i), irr::video::SColor(lines[i].color));
+	}
 }
 
 }

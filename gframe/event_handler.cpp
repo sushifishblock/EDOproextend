@@ -7,6 +7,7 @@
 #include "math.h"
 #include "network.h"
 #include "game.h"
+#include "mod_updater.h"
 #include "duelclient.h"
 #include "data_manager.h"
 #include "image_manager.h"
@@ -1873,6 +1874,10 @@ bool ClientField::OnCommonEvent(const irr::SEvent& event, bool& stopPropagation)
 				if (!mainGame->gSettings.window->isVisible())
 					mainGame->PopupElement(mainGame->gSettings.window);
 				mainGame->env->setFocus(mainGame->gSettings.window);
+				break;
+			}
+			case BUTTON_MOD_UPDATE: {
+				ModUpdater::BeginInstall();
 				break;
 			}
 			case BUTTON_ART_SYNC_CONTINUE: {

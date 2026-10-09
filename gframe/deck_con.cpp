@@ -129,6 +129,10 @@ void DeckBuilder::Terminate(bool showmenu) {
 	mainGame->btnEditorSwitch->setVisible(false);
 	mainGame->wYdkeManage->setVisible(false);
 	mainGame->wHandTest->setVisible(false);
+	mainGame->wDeckStats->setVisible(false);
+	mainGame->wDeckDiff->setVisible(false);
+	mainGame->btnDeckStats->setVisible(false);
+	mainGame->btnDeckDiff->setVisible(false);
 	mainGame->device->setEventReceiver(&mainGame->menuHandler);
 	mainGame->wACMessage->setVisible(false);
 	mainGame->scrFilter->setVisible(false);
@@ -250,6 +254,49 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				mainGame->env->setFocus(mainGame->btnHandTestSettings);
 				break;
 			}
+			case BUTTON_RARITY_RESET_DECK:
+			case BUTTON_RARITY_RESET_ALL: {
+				//two clicks within a few seconds, so it is not done by accident
+				const int which = id == BUTTON_RARITY_RESET_DECK ? 1 : 2;
+				if(mainGame->rarityResetArmed != which) {
+					mainGame->rarityResetArmed = which;
+					mainGame->rarityResetArmTime = mainGame->device->getTimer()->getTime();
+					mainGame->btnRarityResetDeck->setText(L"Reset deck");
+					mainGame->btnRarityResetAll->setText(L"Reset all");
+					(which == 1 ? mainGame->btnRarityResetDeck : mainGame->btnRarityResetAll)->setText(L"Sure? Click again");
+					break;
+				}
+				mainGame->rarityResetArmed = 0;
+				mainGame->btnRarityResetDeck->setText(L"Reset deck");
+				mainGame->btnRarityResetAll->setText(L"Reset all");
+				if(which == 1)
+					RarityFx::ResetDeck();
+				else
+					RarityFx::ResetAll();
+				mainGame->rarityUiSig = 0;
+				mainGame->browserRarityTarget = 0;
+				mainGame->rarityLockCode = 0;
+				if(browser_mode)
+					RefreshBrowserResults();
+				break;
+			}
+			case BUTTON_DECK_STATS: {
+				mainGame->wDeckDiff->setVisible(false);
+				mainGame->PopupElement(mainGame->wDeckStats);
+				break;
+			}
+			case BUTTON_DECK_DIFF: {
+				mainGame->wDeckStats->setVisible(false);
+				mainGame->RefreshDeck(mainGame->cbDeckDiff);
+				mainGame->PopupElement(mainGame->wDeckDiff);
+				mainGame->RefreshDeckDiff();
+				break;
+			}
+			case BUTTON_DECK_TOOLS_CLOSE: {
+				mainGame->wDeckStats->setVisible(false);
+				mainGame->wDeckDiff->setVisible(false);
+				break;
+			}
 			case BUTTON_DECK_YDKE_MANAGE: {
 				mainGame->PopupElement(mainGame->wYdkeManage);
 				break;
@@ -299,6 +346,7 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 			case BUTTON_SAVE_DECK: {
 				int sel = mainGame->cbDBDecks->getSelected();
 				if(sel >= 0 && DeckManager::SaveDeck(Utils::ToPathString(mainGame->cbDBDecks->getItem(sel)), current_deck)) {
+					RarityFx::SaveDeckAs(mainGame->cbDBDecks->getItem(sel));
 					mainGame->stACMessage->setText(gDataManager->GetSysString(1335).data());
 					mainGame->PopupElement(mainGame->wACMessage, 20);
 				}
@@ -327,6 +375,7 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					mainGame->cbDBDecks->setSelected(mainGame->cbDBDecks->getItemCount() - 1);
 				}
 				if(DeckManager::SaveDeck(Utils::ToPathString(dname), current_deck)) {
+					RarityFx::SaveDeckAs(std::wstring(dname));
 					mainGame->stACMessage->setText(gDataManager->GetSysString(1335).data());
 					mainGame->PopupElement(mainGame->wACMessage, 20);
 				}
@@ -356,6 +405,7 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					}
 				}
 				if(DeckManager::RenameDeck(Utils::ToPathString(mainGame->cbDBDecks->getItem(sel)), Utils::ToPathString(dname))) {
+					RarityFx::RenameDeck(mainGame->cbDBDecks->getItem(sel), dname);
 					mainGame->cbDBDecks->removeItem(sel);
 					mainGame->cbDBDecks->setSelected(mainGame->cbDBDecks->addItem(dname));
 				} else {
@@ -417,6 +467,13 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					BufferIO::Write<uint32_t>(pdeck, pcard->code);
 				DuelClient::SendBufferToServer(CTOS_UPDATE_DECK, deckbuf, pdeck - deckbuf);
 				gdeckManager->sent_deck = current_deck;
+				{
+					std::vector<uint32_t> codes;
+					for(const auto* pile : { &deck.main, &deck.extra })
+						for(const auto& pcard : *pile)
+							codes.push_back(pcard->getRealCode());
+					RarityFx::PrepareDuel(std::wstring(), codes);
+				}
 				break;
 			}
 			case BUTTON_SIDE_RELOAD: {
@@ -437,6 +494,7 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				case BUTTON_DELETE_DECK : {
 					int sel = mainGame->cbDBDecks->getSelected();
 					if(DeckManager::DeleteDeck(current_deck, Utils::ToPathString(mainGame->cbDBDecks->getItem(sel)))) {
+						RarityFx::DeleteDeck(mainGame->cbDBDecks->getItem(sel));
 						mainGame->cbDBDecks->removeItem(sel);
 						int count = mainGame->cbDBDecks->getItemCount();
 						if(sel >= count)
@@ -551,6 +609,10 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 		}
 		case irr::gui::EGET_COMBO_BOX_CHANGED: {
 			switch(id) {
+			case COMBOBOX_DECK_DIFF: {
+				mainGame->RefreshDeckDiff();
+				break;
+			}
 			case COMBOBOX_DBLFLIST: {
 				filterList = &gdeckManager->_lfList[mainGame->cbDBLFList->getSelected()];
 				mainGame->ReloadCBLimit();
@@ -628,8 +690,8 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				break;
 			}
 			case COMBOBOX_BROWSER_RARITY: {
-				if(const uint32_t rarity_code = browser_mode ? browser_target_code : mainGame->showingcard) {
-					RarityFx::Set(rarity_code, static_cast<Rarity>(mainGame->cbBrowserRarity->getItemData(mainGame->cbBrowserRarity->getSelected())));
+				if(const uint32_t rarity_code = browser_mode ? browser_target_code : (mainGame->rarityLockCode ? mainGame->rarityLockCode : mainGame->showingcard)) {
+					RarityFx::SetFor(rarity_code, browser_mode ? -1 : mainGame->rarityCopyOrdinal, static_cast<Rarity>(mainGame->cbBrowserRarity->getItemData(mainGame->cbBrowserRarity->getSelected())));
 				}
 				mainGame->env->setFocus(0);
 				break;
@@ -658,6 +720,19 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					RefreshLimitationStatus();
 					if(browser_mode)
 						RefreshBrowserResults();
+					break;
+				}
+				case CHECKBOX_RARITY_DECK: {
+					RarityFx::SetDeckMode(mainGame->chkRarityDeck->isChecked());
+					mainGame->rarityUiSig = 0;
+					mainGame->browserRarityTarget = 0;
+					if(browser_mode)
+						RefreshBrowserResults();
+					break;
+				}
+				case CHECKBOX_RARITY_COPY: {
+					RarityFx::SetPerCopy(mainGame->chkRarityCopy->isChecked());
+					mainGame->rarityUiSig = 0;
 					break;
 				}
 				case CHECKBOX_BROWSER_ONLY_DECK: {
@@ -870,6 +945,11 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					ImportDeck();
 				break;
 			}
+			case irr::KEY_KEY_Z: {
+				if(!browser_mode && !event.KeyInput.Control)
+					mainGame->rarityLockToggle = true;
+				break;
+			}
 			default:
 				break;
 			}
@@ -1076,7 +1156,7 @@ void DeckBuilder::GetHoveredCard() {
 		dragy = mouse_pos.Y;
 	}
 	if(!is_draging && pre_code != hovered_code) {
-		if(hovered_code)
+		if(hovered_code && !mainGame->rarityLockCode)
 			mainGame->ShowCardInfo(hovered_code);
 	}
 }

@@ -20,6 +20,12 @@ public:
 	irr::core::vector3df dRot;
 	irr::core::recti hand_collision;
 	irr::f32 curAlpha = 255;
+	//the rarity of the deck copy this (own) card was given for the duel
+	mutable int rarity_slot = -1;
+	mutable uint32_t rarity_code = 0;
+	//for the summon shine: where the card was last drawn and when it arrived on the field
+	mutable uint32_t shine_location = 0;
+	mutable long long shine_start = -100000;
 	irr::f32 dAlpha;
 	int32_t aniFrame;
 	bool is_moving;

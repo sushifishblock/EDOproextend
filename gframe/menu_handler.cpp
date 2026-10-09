@@ -26,6 +26,7 @@
 #include <IGUITable.h>
 #include <IGUIWindow.h>
 #include "address.h"
+#include "rarity.h"
 #include "fmt.h"
 #include "localtime.h"
 
@@ -50,6 +51,13 @@ static void UpdateDeck() {
 		BufferIO::Write<uint32_t>(pdeck, pcard->code);
 	DuelClient::SendBufferToServer(CTOS_UPDATE_DECK, deckbuf, pdeck - deckbuf);
 	gdeckManager->sent_deck = mainGame->deckBuilder.GetCurrentDeck();
+	{
+		std::vector<uint32_t> codes;
+		for(const auto* pile : { &deck.main, &deck.extra })
+			for(const auto& pcard : *pile)
+				codes.push_back(pcard->getRealCode());
+		RarityFx::PrepareDuel(mainGame->cbDeckSelect->getItem(mainGame->cbDeckSelect->getSelected()), codes);
+	}
 }
 static void LoadReplay() {
 	auto& replay = ReplayMode::cur_replay;
