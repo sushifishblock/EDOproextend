@@ -1,39 +1,53 @@
-# [Project Ignis](https://github.com/ProjectIgnis): EDOPro
+# EDOproextend
 
-The bleeding-edge automatic duel simulator, a fork of the [YGOPro client](https://github.com/Fluorohydride/ygopro).
+My personal mod of [EDOPro](https://github.com/edo9300/edopro), the Yu-Gi-Oh! duel simulator. It adds a full-screen **Card Browser**, a local **AI card search**, a **Genesys** mode and a **most played** sort. 64-bit, Windows.
 
-All YGOPro forks and known automatic duel simulators are powered by the [YGOPro core (ocgcore)](https://github.com/Fluorohydride/ygopro-core), an automated scripting engine for the Yu-Gi-Oh! Official Card Game. EDOPro is powered by our own [ocgcore fork](https://github.com/edo9300/ygopro-core).
+The game itself is still EDOPro: card scripts, databases and the duel core belong to the [Project Ignis](https://github.com/ProjectIgnis) team. This repository is their client source plus my changes.
 
-Due to many accumulated changes in this client and its core, it is incompatible with simulators not derived from this fork.
+## What I added
 
-This repository is for the game client only. Related Ignis projects:
-- [Canonical card script collection](https://github.com/ProjectIgnis/CardScripts)
-- [Canonical card databases collection](https://github.com/ProjectIgnis/BabelCdb)
-- [WindBot Ignite](https://github.com/ProjectIgnis/windbot/)
+- **Card Browser** - a "Card Browser" button on the main menu opens every card in one full-screen grid, with the same filters as the deck editor. Hover a card to preview it, click to pin it, double-click to add it, right-click to remove it. The `-`/`+` and `0`-`3` buttons set how many copies are in the deck, `A-`/`A+` change the text size, and the switch button jumps between the Card Browser and the Deck Editor.
+- **No grey loading cards** - all card art (full size) and the small deck editor pictures are preloaded when the game starts. A warm start takes about 3 seconds.
+- **AI search** - type a request in plain English under the grid, for example `dragon monsters that do stuff in hand when added`, and press Ask AI. A local model (llama.cpp with Qwen2.5-3B and nomic embeddings) turns it into filters and ranks the cards by meaning. It runs on my PC, nothing is sent online.
+- **Genesys mode** - tick the Genesys box in the deck panel. Each card shows its point cost as a black tab, the deck shows a total out of 100 with a bar, every card is allowed 3 copies, and Link and Pendulum monsters are blocked. The point list is refreshed from YGOPRODeck every time the game starts (the game restarts once from the main menu if it changed).
+- **Most played sort** - "Most played" in the sort dropdown orders cards by competitive usage (YugiohMeta ranking, TCG first). It is refreshed at every start too.
 
-## Contributing
+## My setup
 
-Please keep all usage questions and Windows and macOS bug reports on Discord; do not open an issue or pull request for this purpose.
-We are not taking suggestions or feature requests and the issue tracker is not to be used for this purpose either.
+| Thing | Where |
+|---|---|
+| Game install (64-bit) | `C:\ProjectIgnis64` |
+| Original 32-bit install | `C:\ProjectIgnis` (untouched) |
+| AI files | `C:\ProjectIgnis64\ai` (`llama\`, `models\`, `prompts\`) |
+| Data files made by the game | `genesys_points.json`, `popularity.json`, `cardcache\cards.pack` |
+| Source and build scripts | this repository |
 
-Otherwise, pull requests are welcome! It might take some time for them to be evaluated since we are pretty swamped with a lot work to be done.
+The AI models and card art are not in this repository. If the `ai` folder is missing, the AI box simply doesn't appear.
 
-Check out the [wiki](https://github.com/edo9300/edopro/wiki/) for possibly outdated build instructions and a partial user manual.
+## Installing a new build
 
-## Project Ignis
+1. Close EDOPro.
+2. Keep the old exe: copy `EDOPro.exe` to `EDOPro.previous.exe`.
+3. Copy `release/EDOPro-x64.exe` over `C:\ProjectIgnis64\EDOPro.exe`.
 
-We are an international, open-source collaboration staffed entirely by volunteers and we welcome support on our projects.
-Reach out to us on Discord to learn how to contribute and join!
+To go back, copy `EDOPro.previous.exe` over `EDOPro.exe`.
 
-_Ignis_ is the fire and light of knowledge passed from the gods to humanity in Greco-Roman mythology.
-This represents our vision for all of our projects and work and recognizes the contribution of every individual on the team.
+## Building
 
-[Debut announcement on Reddit](https://www.reddit.com/r/yugioh/comments/fvdn7v/presenting_project_ignis_edopro_the_opensource/).
+Needs Visual Studio 2022 (MSVC v143, Windows SDK 10.0.26100). The script expects a `build-tools/` folder (not in this repository, it is several GB) that holds `premake5.exe`, the DirectX SDK, the vcpkg `x64-windows-static` libraries in `vcpkg-x64` and a 64-bit ocgcore import library in `core-x64`. Copy `mod-tools/build-x64.sh` into `build-tools/` and run from the repository root:
 
-## License
+```bash
+bash build-tools/build-x64.sh
+```
 
-EDOPro is free/libre and open source software licensed under the GNU Affero General Public License, version 3 or later.
-Dependencies and resources may be provided under different licenses.
-Please see [LICENSE](https://github.com/edo9300/edopro/blob/master/LICENSE) and [COPYING](https://github.com/edo9300/edopro/blob/master/COPYING) for more details.
+The output is `bin/x64/release/ygoprodll.exe`. `patches/` holds the Irrlicht fix that made the card preload fast (the texture list was sorted on every insert).
 
-Yu-Gi-Oh! is a trademark of Shueisha and Konami. This project is not affiliated with or endorsed by Shueisha or Konami.
+## Helper scripts (`mod-tools/`)
+
+- `update_genesys.py` - download the Genesys point list by hand.
+- `import_card_art.py` - download high resolution art for the official cards.
+- `ai/` - the prompt, JSON schema and the test script used to tune the AI search.
+
+## Credits
+
+EDOPro by [edo9300](https://github.com/edo9300/edopro) and Project Ignis (AGPL-3.0, see `LICENSE`). Card data and prices from YGOPRODeck and YugiohMeta. AI models: Qwen2.5-3B-Instruct and nomic-embed-text through llama.cpp.
