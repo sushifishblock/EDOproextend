@@ -99,6 +99,8 @@ public:
 	uint32_t browser_target_code = 0;
 	bool browser_only_deck = false;
 	bool browser_ai_mode = false;
+	//cards added from the card browser go to the side deck instead of the main/extra deck
+	bool browser_add_to_side = false;
 	void ApplyAiResult(const AiResult& result);
 	//background preload of every result's art: positions in `results` already handed to the loader
 	uint32_t browser_results_epoch = 0;

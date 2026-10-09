@@ -40,6 +40,7 @@ public:
 	irr::u16 iRectangle[6];
 	irr::u16 iArrow[40];
 	irr::video::SMaterial mCard;
+	irr::video::SMaterial mRarity;
 	irr::video::SMaterial mTexture;
 	irr::video::SMaterial mBackLine;
 	irr::video::SMaterial mOutLine;

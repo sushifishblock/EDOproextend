@@ -7,6 +7,7 @@
 #include "config.h"
 #include "deck_con.h"
 #include "genesys.h"
+#include "rarity.h"
 #include "popularity.h"
 #include "utils.h"
 #include "data_manager.h"
@@ -192,6 +193,7 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					EnterBrowserMode();
 				break;
 			}
+			case BUTTON_BROWSER_TARGET:
 			case BUTTON_BROWSER_MINUS:
 			case BUTTON_BROWSER_PLUS:
 			case BUTTON_BROWSER_SET_0:
@@ -623,6 +625,13 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					}
 				}
 				StartFilter(true);
+				break;
+			}
+			case COMBOBOX_BROWSER_RARITY: {
+				if(const uint32_t rarity_code = browser_mode ? browser_target_code : mainGame->showingcard) {
+					RarityFx::Set(rarity_code, static_cast<Rarity>(mainGame->cbBrowserRarity->getItemData(mainGame->cbBrowserRarity->getSelected())));
+				}
+				mainGame->env->setFocus(0);
 				break;
 			}
 			case COMBOBOX_SORTTYPE: {
@@ -1888,6 +1897,14 @@ bool DeckBuilder::AddCopy(const CardDataC* pointer, bool forced) {
 			SetBrowserMessage(std::wstring(gDataManager->GetName(pointer->code)) + L": limit is " + std::to_wstring(GetCardLimit(pointer)) + L" on this ban list");
 		return false;
 	}
+	if(browser_add_to_side) {
+		if(push_side(pointer, -1, forced)) {
+			RefreshBrowserResults();
+			return true;
+		}
+		SetBrowserMessage(L"The Side Deck is full");
+		return false;
+	}
 	if(push_extra(pointer, -1, forced) || push_main(pointer, -1, forced)) {
 		RefreshBrowserResults();
 		return true;
@@ -1898,6 +1915,16 @@ bool DeckBuilder::AddCopy(const CardDataC* pointer, bool forced) {
 bool DeckBuilder::RemoveCopy(const CardDataC* pointer) {
 	const uint32_t limitcode = pointer->alias ? pointer->alias : pointer->code;
 	const auto matches = [&](const CardDataC* pcard) { return pcard->code == limitcode || pcard->alias == limitcode; };
+	if(browser_add_to_side) {
+		//in side deck mode a copy is taken out of the side deck first
+		for(int i = static_cast<int>(current_deck.side.size()) - 1; i >= 0; --i) {
+			if(matches(current_deck.side[i])) {
+				pop_side(i);
+				RefreshBrowserResults();
+				return true;
+			}
+		}
+	}
 	for(int i = static_cast<int>(current_deck.main.size()) - 1; i >= 0; --i) {
 		if(matches(current_deck.main[i])) {
 			pop_main(i);
@@ -2032,6 +2059,11 @@ bool DeckBuilder::OnBrowserButton(int id) {
 		mainGame->ApplyBrowserTextSize();
 		return true;
 	}
+	case BUTTON_BROWSER_TARGET:
+		browser_add_to_side = !browser_add_to_side;
+		mainGame->btnBrowserTarget->setText(browser_add_to_side ? L"To Side" : L"To Main");
+		SetBrowserMessage(browser_add_to_side ? L"Cards you add now go to the Side Deck" : L"Cards you add now go to the Main/Extra Deck");
+		return true;
 	case BUTTON_BROWSER_SIZE_SMALLER:
 		SetBrowserColumns(gGameConfig->browserColumns + 1);
 		return true;

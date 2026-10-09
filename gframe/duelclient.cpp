@@ -2328,6 +2328,7 @@ int DuelClient::ClientAnalyze(const uint8_t* msg, uint32_t len) {
 		else if(count == 3) startpos = 82;
 		else startpos = 155;
 		std::lock_guard<epro::mutex> lock(mainGame->gMutex);
+		mainGame->posSelectCode = code;
 		if(positions & POS_FACEUP_ATTACK) {
 			mainGame->imageLoading[mainGame->btnPSAU] = code;
 			mainGame->btnPSAU->setRelativePosition(mainGame->Scale<irr::s32>(startpos, 45, startpos + 140, 185));

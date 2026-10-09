@@ -172,6 +172,12 @@ Materials::Materials() {
 	mCard.MaterialType = irr::video::EMT_ONETEXTURE_BLEND;
 	mCard.MaterialTypeParam = pack_textureBlendFunc(irr::video::EBF_SRC_ALPHA, irr::video::EBF_ONE_MINUS_SRC_ALPHA, irr::video::EMFN_MODULATE_1X, irr::video::EAS_VERTEX_COLOR);
 	ENABLE_ZWRITE(mCard);
+	//rarity effects over the card front: colors come from the vertices, alpha from vertices and texture, nothing is written to the depth buffer
+	mRarity.Lighting = false;
+	mRarity.MaterialType = irr::video::EMT_ONETEXTURE_BLEND;
+	mRarity.MaterialTypeParam = pack_textureBlendFunc(irr::video::EBF_SRC_ALPHA, irr::video::EBF_ONE_MINUS_SRC_ALPHA, irr::video::EMFN_MODULATE_1X,
+													 static_cast<irr::video::E_ALPHA_SOURCE>(irr::video::EAS_TEXTURE | irr::video::EAS_VERTEX_COLOR));
+	mRarity.ZWriteEnable = irr::video::EZW_OFF;
 	mTexture.AmbientColor = 0xffffffff;
 	mTexture.DiffuseColor = 0xff000000;
 	mTexture.ColorMaterial = irr::video::ECM_NONE;

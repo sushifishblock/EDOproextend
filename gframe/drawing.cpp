@@ -2,6 +2,7 @@
 #include <irrlicht.h>
 #include "game.h"
 #include "genesys.h"
+#include "rarity.h"
 #include "repo_manager.h"
 #include "materials.h"
 #include "client_card.h"
@@ -378,6 +379,11 @@ void Game::DrawCard(ClientCard* pcard) {
 		matManager.mCard.setTexture(0, imageManager.GetTextureCard(pcard->code, imgType::ART));
 		driver->setMaterial(matManager.mCard);
 		driver->drawVertexPrimitiveList(matManager.vCardFront, 4, matManager.iRectangle, 2);
+		//only my own cards are foil, not the same card of the opponent
+		if(pcard->code && pcard->controler == 0) {
+			if(const auto rarity = RarityFx::Get(pcard->code); rarity != Rarity::NORMAL)
+				RarityFx::Draw3D(driver, matManager.mRarity, rarity, device->getTimer()->getTime(), static_cast<uint32_t>(std::clamp(std::round(pcard->curAlpha), 0.0f, 255.0f)));
+		}
 	}
 	if(m22 < 0.99 || pcard->is_moving) {
 		auto txt = imageManager.GetTextureCard(pcard->cover, imgType::COVER);
@@ -1205,6 +1211,10 @@ void Game::DrawThumb(const CardDataC* cp, irr::core::vector2di pos, LFList* lfli
 		otloc = irr::core::recti(pos.X + 7, pos.Y + 50 * window_scale.Y, pos.X + 37 * window_scale.X, pos.Y + 65 * window_scale.Y);
 	}
 	driver->draw2DImage(img, dragloc, irr::core::recti(0, 0, size.Width, size.Height), cliprect);
+	if(load_image) {
+		if(const auto rarity = RarityFx::Get(code); rarity != Rarity::NORMAL)
+			RarityFx::Draw2D(driver, dragloc, rarity, device->getTimer()->getTime(), cliprect);
+	}
 	if(Genesys::enabled) {
 		if(const int pts = Genesys::Points(cp); pts > 0 && !Genesys::Illegal(cp)) {
 			DrawGenesysBadge(dragloc, pts, cliprect);
@@ -1574,6 +1584,92 @@ bool Game::UpdateArtSync() {
 	artSync = std::make_unique<ArtSync>(std::move(jobs));
 	return true;
 }
+//the rarity effect over the big card picture of the info panel (drawn after the GUI, which draws the picture itself)
+void Game::DrawRarityPreview() {
+	//the cards of my own that are shown in the card selection / card display windows (searching the deck, the graveyard...)
+	if(dInfo.isInDuel) {
+		const auto settled = [&](irr::gui::IGUIElement* window) {
+			if(!window->isVisible())
+				return false;
+			for(const auto& unit : fadingList) {
+				if(unit.guiFading == window)
+					return false;
+			}
+			return true;
+		};
+		const auto overlay = [&](irr::gui::IGUIButton* button, const ClientCard* card, const irr::core::recti& clip) {
+			if(!card || !card->code || card->controler != 0 || !button->isVisible())
+				return;
+			if(const auto rarity = RarityFx::Get(card->code); rarity != Rarity::NORMAL)
+			{
+				//the card picture is a little smaller than its button
+				const auto box = button->getAbsolutePosition();
+				const int card_h = static_cast<int>(box.getHeight() * 0.93f);
+				const int card_w = static_cast<int>(card_h * static_cast<float>(CARD_IMG_WIDTH) / CARD_IMG_HEIGHT);
+				const auto center = box.getCenter();
+				RarityFx::Draw2D(driver, irr::core::recti(center.X - card_w / 2, center.Y - card_h / 2, center.X + card_w / 2, center.Y + card_h / 2), rarity, device->getTimer()->getTime(), &clip);
+			}
+		};
+		//the battle position window shows the card upright (attack) and lying down (defense)
+		if(settled(wPosSelect) && posSelectCode) {
+			if(const auto rarity = RarityFx::Get(posSelectCode); rarity != Rarity::NORMAL) {
+				const auto card_rect = [&](irr::gui::IGUIButton* button, bool lying) {
+					const auto box = button->getAbsolutePosition();
+					const int side = box.getHeight();
+					const int card_w = static_cast<int>(side * (CARD_IMG_WIDTH * 0.5f) / 140.0f);
+					const int card_h = static_cast<int>(side * (CARD_IMG_HEIGHT * 0.5f) / 140.0f);
+					const auto center = box.getCenter();
+					const int w = lying ? card_h : card_w, h = lying ? card_w : card_h;
+					return irr::core::recti(center.X - w / 2, center.Y - h / 2, center.X + w / 2, center.Y + h / 2);
+				};
+				if(btnPSAU->isVisible())
+					RarityFx::Draw2D(driver, card_rect(btnPSAU, false), rarity, device->getTimer()->getTime(), &wPosSelect->getAbsolutePosition());
+				if(btnPSDU->isVisible())
+					RarityFx::Draw2D(driver, card_rect(btnPSDU, true), rarity, device->getTimer()->getTime(), &wPosSelect->getAbsolutePosition(), true);
+			}
+		}
+		if(settled(wCardSelect)) {
+			const int pos = scrCardList->isVisible() ? scrCardList->getPos() / 10 : 0;
+			for(int i = 0; i < 5; ++i) {
+				const size_t index = static_cast<size_t>(i + pos);
+				if(index < dField.selectable_cards.size())
+					overlay(btnCardSelect[i], dField.selectable_cards[index], wCardSelect->getAbsolutePosition());
+			}
+		}
+		if(settled(wCardDisplay)) {
+			const int pos = scrDisplayList->isVisible() ? scrDisplayList->getPos() / 10 : 0;
+			for(int i = 0; i < 5; ++i) {
+				const size_t index = static_cast<size_t>(i + pos);
+				if(index < dField.display_cards.size())
+					overlay(btnCardDisplay[i], dField.display_cards[index], wCardDisplay->getAbsolutePosition());
+			}
+		}
+	}
+	//the rarity picker: in the card browser it follows the hovered card, in the deck editor the card shown in the info panel
+	const int mode = deckBuilder.browser_mode ? 1 : (is_building || is_siding) ? 2 : 0;
+	if(mode == 2 && showingcard != browserRarityTarget) {
+		browserRarityTarget = showingcard;
+		cbBrowserRarity->setSelected(static_cast<int>(RarityFx::Get(showingcard)));
+	}
+	if(mode != rarityUiMode) {
+		rarityUiMode = mode;
+		stBrowserRarity->setVisible(mode != 0);
+		cbBrowserRarity->setVisible(mode != 0);
+		RefreshCardInfoTextPositions();
+	}
+	if(!showingcard || !imgCard->isVisible() || !wCardImg->isVisible())
+		return;
+	const auto rarity = RarityFx::Get(showingcard);
+	if(rarity == Rarity::NORMAL)
+		return;
+	if(dInfo.isInDuel) {
+		//a card of the opponent is shown without the effect
+		const ClientCard* shown = dField.hovered_card ? dField.hovered_card : dField.clicked_card;
+		if(shown && shown->code == showingcard && shown->controler != 0)
+			return;
+	}
+	RarityFx::Draw2D(driver, imgCard->getAbsolutePosition(), rarity, device->getTimer()->getTime(), nullptr);
+}
 void Game::DrawArtSync() {
 	if(!artSync)
 		return;
@@ -1671,13 +1767,23 @@ void Game::DrawArtPreloadStatus() {
 		return;
 	if(deckBuilder.browser_mode)
 		return; //the card browser shows this in its header
-	DrawShadowText(textFont, epro::format(L"Loading card art {}%", percent), Resize(40, 612, 400, 632), Resize(1, 1, 1, 1), 0xffffffff, 0xff000000, false, true);
+	const auto label = epro::format(L"Loading card art {}%", percent);
+	const int text_w = textFont->getDimension(label.c_str()).Width;
+	const int pad = Scale(8);
+	const int cx = Scale(220);
+	const irr::core::recti box(cx - text_w / 2 - pad, Scale(610), cx + text_w / 2 + pad, Scale(634));
+	driver->draw2DRectangle(0xd8101018, box);
+	driver->draw2DRectangleOutline(box, 0xff5a8cff);
+	DrawShadowText(textFont, label, irr::core::recti(box.UpperLeftCorner.X, Scale(612), box.LowerRightCorner.X, Scale(632)), Resize(1, 1, 1, 1), 0xffffffff, 0xff000000, true, true);
 }
 void Game::SetBrowserWidgetsVisible(bool visible) {
 	stBrowserCopies->setVisible(visible);
 	stBrowserCount->setVisible(visible);
 	btnBrowserMinus->setVisible(visible);
 	btnBrowserPlus->setVisible(visible);
+	btnBrowserTarget->setVisible(visible);
+	stBrowserRarity->setVisible(visible);
+	cbBrowserRarity->setVisible(visible);
 	for(auto* button : btnBrowserSet)
 		button->setVisible(visible);
 	btnBrowserTextSmaller->setVisible(visible);
@@ -1745,8 +1851,12 @@ void Game::UpdateBrowserControls() {
 	int copies = 0;
 	if(cd) {
 		copies = deckBuilder.CountCopies(cd);
+		if(cd->code != browserRarityTarget) {
+			browserRarityTarget = cd->code;
+			cbBrowserRarity->setSelected(static_cast<int>(RarityFx::Get(cd->code)));
+		}
 		const bool extra = (cd->type & (TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ)) || (cd->type & (TYPE_LINK | TYPE_SPELL)) == TYPE_LINK;
-		label = epro::format(L"In deck: {} of {} ({})", copies, deckBuilder.GetCardLimit(cd), extra ? L"Extra" : L"Main");
+		label = epro::format(L"In deck: {} of {} ({})", copies, deckBuilder.GetCardLimit(cd), deckBuilder.browser_add_to_side ? L"Side" : extra ? L"Extra" : L"Main");
 		if(Genesys::enabled)
 			label += epro::format(L"  {} pts", Genesys::Points(cd));
 	} else {
@@ -1822,6 +1932,8 @@ void Game::DrawCardBrowser() {
 			}
 			const auto size = img->getOriginalSize();
 			driver->draw2DImage(img, cell, irr::core::recti(0, 0, size.Width, size.Height), &clip);
+			if(const auto rarity = RarityFx::Get(ptr->code); rarity != Rarity::NORMAL)
+				RarityFx::Draw2D(driver, cell, rarity, device->getTimer()->getTime(), &clip);
 			//ban list marker
 			const int limit = deckBuilder.GetCardLimit(ptr);
 			const auto limitloc = Resize(static_cast<int>(x), static_cast<int>(y), static_cast<int>(x) + 22, static_cast<int>(y) + 22);

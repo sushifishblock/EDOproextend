@@ -188,6 +188,9 @@ struct main_menu_panel_elements {
 	irr::gui::IGUIStaticText* stBrowserCount;
 	irr::gui::IGUIButton* btnBrowserMinus;
 	irr::gui::IGUIButton* btnBrowserPlus;
+	irr::gui::IGUIButton* btnBrowserTarget;
+	irr::gui::IGUIStaticText* stBrowserRarity;
+	irr::gui::IGUIComboBox* cbBrowserRarity;
 	irr::gui::IGUIButton* btnBrowserSet[4];
 	irr::gui::IGUIButton* btnBrowserTextSmaller;
 	irr::gui::IGUIButton* btnBrowserTextLarger;
@@ -210,6 +213,9 @@ struct main_menu_panel_elements {
 	std::vector<uint32_t> artPreloadCodes;
 	size_t artPreloadCursor = 0;
 	size_t thumbPreloadCursor = 0;
+	uint32_t browserRarityTarget = 0;
+	int rarityUiMode = 0;
+	uint32_t posSelectCode = 0;
 	//downloading the high resolution card art before the game can be used
 	std::unique_ptr<ArtSync> artSync;
 	size_t artSyncCardCount = 0;
@@ -591,6 +597,7 @@ public:
 	void UpdateArtPreload();
 	bool UpdateArtSync();
 	void DrawArtSync();
+	void DrawRarityPreview();
 	void DrawArtPreloadStatus();
 	int ArtPreloadPercent() const;
 	void ApplyBrowserTextSize();

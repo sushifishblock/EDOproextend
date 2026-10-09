@@ -8,6 +8,7 @@
 #include "config.h"
 #include "game.h"
 #include "genesys.h"
+#include "rarity.h"
 #include "popularity.h"
 #include "server_lobby.h"
 #include "sound_manager.h"
@@ -577,6 +578,7 @@ void Game::Initialize() {
 	stArtSyncBlock->setVisible(false);
 	btnArtSyncContinue = AlignElementWithParent(env->addButton(Scale(392, 440, 632, 476), 0, BUTTON_ART_SYNC_CONTINUE, L"No connection - continue anyway"));
 	btnArtSyncContinue->setVisible(false);
+	RarityFx::Load();
 	Genesys::Load();
 	Genesys::enabled = gGameConfig->genesysMode && Genesys::HasList();
 	Genesys::StartUpdate();
@@ -1498,10 +1500,17 @@ void Game::PopulateTabSettingsWindow() {
 		stBrowserCount = env->addStaticText(L"0", Scale(45, 306, 85, 330), false, false, tabInfo);
 		stBrowserCount->setTextAlignment(irr::gui::EGUIA_CENTER, irr::gui::EGUIA_CENTER);
 		btnBrowserPlus = env->addButton(Scale(89, 306, 115, 330), tabInfo, BUTTON_BROWSER_PLUS, L"+");
+		btnBrowserTarget = env->addButton(Scale(162, 280, 210, 300), tabInfo, BUTTON_BROWSER_TARGET, L"To Main");
+		btnBrowserTarget->setIsPushButton(false);
+		stBrowserRarity = env->addStaticText(L"Rarity", Scale(15, 255, 60, 275), false, false, tabInfo);
+		stBrowserRarity->setOverrideColor(0xffffd54a);
+		cbBrowserRarity = AddComboBox(env, Scale(62, 255, 205, 275), tabInfo, COMBOBOX_BROWSER_RARITY);
+		for(int i = 0; i < static_cast<int>(Rarity::COUNT); ++i)
+			cbBrowserRarity->addItem(RarityFx::Name(static_cast<Rarity>(i)), i);
 		for(int i = 0; i < 4; i++)
 			btnBrowserSet[i] = env->addButton(Scale(200 + i * 23, 306, 220 + i * 23, 330), tabInfo, BUTTON_BROWSER_SET_0 + i, epro::to_wstring(i).data());
 		//only shown in the card browser
-		for(auto* widget : std::initializer_list<irr::gui::IGUIElement*>{ stBrowserCopies, stBrowserCount, btnBrowserMinus, btnBrowserPlus, btnBrowserTextSmaller, btnBrowserTextLarger })
+		for(auto* widget : std::initializer_list<irr::gui::IGUIElement*>{ stBrowserCopies, stBrowserCount, btnBrowserMinus, btnBrowserPlus, btnBrowserTarget, stBrowserRarity, cbBrowserRarity, btnBrowserTextSmaller, btnBrowserTextLarger })
 			widget->setVisible(false);
 		for(auto* button : btnBrowserSet)
 			button->setVisible(false);
@@ -2197,6 +2206,7 @@ bool Game::MainLoop() {
 		UpdateArtPreload();
 		DrawGUI();
 		DrawSpec();
+		DrawRarityPreview();
 		DrawArtPreloadStatus();
 		DrawArtSync();
 		if(cardimagetextureloading) {
@@ -2964,7 +2974,7 @@ void Game::RefreshCardInfoTextPositions() {
 	offsetIfVisibleWithContent(stDataInfo);
 	offsetIfVisibleWithContent(stSetName);
 	offsetIfVisibleWithContent(stPasscodeScope);
-	const int reserved = deckBuilder.browser_mode ? ResizeY(58) : Scale(1);
+	const int reserved = deckBuilder.browser_mode ? ResizeY(86) : (is_building || is_siding) ? ResizeY(34) : Scale(1);
 	stText->setRelativePosition(irr::core::recti(xLeft, offset, xRight, stText->getParent()->getAbsolutePosition().getHeight() - reserved));
 	if(deckBuilder.browser_mode) {
 		//keep the browser controls pinned to the bottom of the info tab
@@ -2973,7 +2983,10 @@ void Game::RefreshCardInfoTextPositions() {
 		const int row2 = height - ResizeY(28);
 		const int h1 = ResizeY(22);
 		const int h2 = ResizeY(26);
-		stBrowserCopies->setRelativePosition(irr::core::recti(ResizeX(15), row1, ResizeX(200), row1 + h1));
+		stBrowserCopies->setRelativePosition(irr::core::recti(ResizeX(15), row1, ResizeX(160), row1 + h1));
+		btnBrowserTarget->setRelativePosition(irr::core::recti(ResizeX(162), row1, ResizeX(210), row1 + h1));
+		stBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(15), row1 - ResizeY(23), ResizeX(50), row1 - ResizeY(2)));
+		cbBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(42), row1 - ResizeY(28), ResizeX(205), row1 - ResizeY(6)));
 		btnBrowserTextSmaller->setRelativePosition(irr::core::recti(ResizeX(215), row1, ResizeX(250), row1 + h1));
 		btnBrowserTextLarger->setRelativePosition(irr::core::recti(ResizeX(254), row1, ResizeX(289), row1 + h1));
 		btnBrowserMinus->setRelativePosition(irr::core::recti(ResizeX(15), row2, ResizeX(45), row2 + h2));
@@ -2981,6 +2994,12 @@ void Game::RefreshCardInfoTextPositions() {
 		btnBrowserPlus->setRelativePosition(irr::core::recti(ResizeX(93), row2, ResizeX(123), row2 + h2));
 		for(int i = 0; i < 4; i++)
 			btnBrowserSet[i]->setRelativePosition(irr::core::recti(ResizeX(163 + i * 32), row2, ResizeX(191 + i * 32), row2 + h2));
+	} else if(is_building || is_siding) {
+		//deck editor: only the rarity picker, at the bottom of the info tab
+		const int height = stText->getParent()->getAbsolutePosition().getHeight();
+		const int row = height - ResizeY(30);
+		stBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(15), row + ResizeY(5), ResizeX(50), row + ResizeY(27)));
+		cbBrowserRarity->setRelativePosition(irr::core::recti(ResizeX(42), row, ResizeX(205), row + ResizeY(22)));
 	}
 }
 void Game::ClearCardInfo(int player) {
