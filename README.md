@@ -24,13 +24,11 @@ The game itself is still EDOPro: card scripts, databases and the duel core belon
 
 The AI models and card art are not in this repository. If the `ai` folder is missing, the AI box simply doesn't appear.
 
-## Installing a new build
+## Installing (also for friends)
 
-1. Close EDOPro.
-2. Keep the old exe: copy `EDOPro.exe` to `EDOPro.previous.exe`.
-3. Copy `release/EDOPro-x64.exe` over `C:\ProjectIgnis64\EDOPro.exe`.
+This is a mod, not a full game: it needs a normal [EDOPro](https://projectignis.github.io) install for the scripts, databases and pictures. Download `EDOproextend-1.0-x64.zip` from the [Releases](../../releases) page and follow `INSTALL.txt` inside it: copy `EDOPro.exe` **and** `ocgcore.dll` into the EDOPro folder and replace `config/configs.json`. Without `ocgcore.dll` next to the exe the game stops with "ocgcore.dll was not found".
 
-To go back, copy `EDOPro.previous.exe` over `EDOPro.exe`.
+To go back, put the old `EDOPro.exe` back (keep a copy as `EDOPro.previous.exe`).
 
 ## Building
 
