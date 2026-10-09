@@ -3457,6 +3457,8 @@ void Game::ReloadCBSortType() {
 		cbSortType->addItem(label ? label : gDataManager->GetSysString(stringid).data(), val);
 	}
 	cbSortType->addItem(L"Most played", DeckBuilder::SORT_MODIFIER_POPULARITY);
+	cbSortType->addItem(L"Most Genesys points", DeckBuilder::SORT_MODIFIER_GENESYS);
+	cbSortType->addItem(L"Least Genesys points", DeckBuilder::SORT_MODIFIER_GENESYS_ASC);
 }
 void Game::ReloadCBCardType() {
 	static constexpr std::array<std::pair<uint32_t, DeckBuilder::CARD_TYPE_FILTER>, 5> items{ {

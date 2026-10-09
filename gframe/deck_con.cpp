@@ -1501,6 +1501,26 @@ void DeckBuilder::SortList() {
 	case SORT_MODIFIER::SORT_MODIFIER_POPULARITY:
 		sort(Popularity::Less);
 		break;
+	case SORT_MODIFIER::SORT_MODIFIER_GENESYS_ASC:
+		//cheapest cards that cost points first; the many cards that cost nothing come after them
+		sort([](const CardDataC* a, const CardDataC* b) {
+			const int pa = Genesys::Points(a), pb = Genesys::Points(b);
+			if((pa > 0) != (pb > 0))
+				return pa > 0;
+			if(pa != pb)
+				return pa < pb;
+			return DataManager::deck_sort_name(a, b);
+		});
+		break;
+	case SORT_MODIFIER::SORT_MODIFIER_GENESYS:
+		//most Genesys points first, cards with the same cost by name
+		sort([](const CardDataC* a, const CardDataC* b) {
+			const int pa = Genesys::Points(a), pb = Genesys::Points(b);
+			if(pa != pb)
+				return pa > pb;
+			return DataManager::deck_sort_name(a, b);
+		});
+		break;
 	}
 }
 void DeckBuilder::ClearDeck() {
