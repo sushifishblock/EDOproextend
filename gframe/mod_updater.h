@@ -11,7 +11,7 @@ namespace ygo {
 //EDOPro-x64.exe asset, swaps it in for the running exe (a running exe can be renamed) and starts the new one.
 class ModUpdater {
 public:
-	static constexpr const char* VERSION = "1.3";
+	static constexpr const char* VERSION = "1.3.1";
 	enum State { IDLE, CHECKING, AVAILABLE, DOWNLOADING, FAILED, RESTART };
 	//deletes the exe left over from the previous update
 	static void CleanupOld();

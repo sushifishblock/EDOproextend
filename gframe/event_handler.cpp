@@ -1026,7 +1026,7 @@ bool ClientField::OnEvent(const irr::SEvent& event) {
 		case irr::gui::EGET_ELEMENT_HOVERED: {
 			if(id >= BUTTON_CARD_0 && id <= BUTTON_CARD_4) {
 				int pos = mainGame->scrCardList->getPos() / 10;
-				ClientCard* mcard = selectable_cards[id - BUTTON_CARD_0 + pos];
+				ClientCard* mcard = (static_cast<size_t>(id - BUTTON_CARD_0 + pos) < selectable_cards.size()) ? selectable_cards[id - BUTTON_CARD_0 + pos] : nullptr;
 				if(mcard) {
 					SetShowMark(mcard, true);
 					ShowCardInfoInList(mcard, mainGame->btnCardSelect[id - BUTTON_CARD_0], mainGame->wCardSelect);
@@ -1042,7 +1042,7 @@ bool ClientField::OnEvent(const irr::SEvent& event) {
 			}
 			if(id >= BUTTON_DISPLAY_0 && id <= BUTTON_DISPLAY_4) {
 				int pos = mainGame->scrDisplayList->getPos() / 10;
-				ClientCard* mcard = display_cards[id - BUTTON_DISPLAY_0 + pos];
+				ClientCard* mcard = (static_cast<size_t>(id - BUTTON_DISPLAY_0 + pos) < display_cards.size()) ? display_cards[id - BUTTON_DISPLAY_0 + pos] : nullptr;
 				if(mcard) {
 					SetShowMark(mcard, true);
 					ShowCardInfoInList(mcard, mainGame->btnCardDisplay[id - BUTTON_DISPLAY_0], mainGame->wCardDisplay);
@@ -1065,14 +1065,14 @@ bool ClientField::OnEvent(const irr::SEvent& event) {
 			if(mainGame->stCardListTip->isVisible()) {
 				if(id >= BUTTON_CARD_0 && id <= BUTTON_CARD_4) {
 					int pos = mainGame->scrCardList->getPos() / 10;
-					ClientCard* mcard = selectable_cards[id - BUTTON_CARD_0 + pos];
+					ClientCard* mcard = (static_cast<size_t>(id - BUTTON_CARD_0 + pos) < selectable_cards.size()) ? selectable_cards[id - BUTTON_CARD_0 + pos] : nullptr;
 					if(mcard)
 						SetShowMark(mcard, false);
 					mainGame->stCardListTip->setVisible(false);
 				}
 				if(id >= BUTTON_DISPLAY_0 && id <= BUTTON_DISPLAY_4) {
 					int pos = mainGame->scrDisplayList->getPos() / 10;
-					ClientCard* mcard = display_cards[id - BUTTON_DISPLAY_0 + pos];
+					ClientCard* mcard = (static_cast<size_t>(id - BUTTON_DISPLAY_0 + pos) < display_cards.size()) ? display_cards[id - BUTTON_DISPLAY_0 + pos] : nullptr;
 					if(mcard)
 						SetShowMark(mcard, false);
 					mainGame->stCardListTip->setVisible(false);
