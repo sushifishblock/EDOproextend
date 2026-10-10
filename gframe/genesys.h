@@ -43,6 +43,7 @@ private:
 	static inline std::atomic<bool> has_pending{ false };
 	static inline std::atomic<bool> update_started{ false };
 	static inline std::atomic<bool> restart_wanted{ false };
+	static inline bool started_with_list = false;
 	static inline std::unordered_map<uint32_t, int> points;
 };
 

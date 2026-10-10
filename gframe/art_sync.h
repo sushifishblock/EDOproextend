@@ -40,6 +40,7 @@ public:
 	static constexpr uint64_t HIGH_RES_MIN_BYTES = 70000;
 private:
 	void Run();
+	void RunInner();
 	std::vector<Job> jobs;
 	size_t total = 0;
 	std::atomic<size_t> processed{ 0 }, downloaded{ 0 }, missing{ 0 }, failed{ 0 };

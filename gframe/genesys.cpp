@@ -44,6 +44,7 @@ size_t WriteBody(char* data, size_t size, size_t count, void* user) {
 void Genesys::StartUpdate() {
 	if(update_started.exchange(true))
 		return;
+	started_with_list = HasList();
 	std::thread(&Genesys::UpdateThread).detach();
 }
 
@@ -109,7 +110,7 @@ void Genesys::UpdateThread() {
 		std::lock_guard<std::mutex> lock(pending_mutex);
 		pending_points = std::move(fresh);
 		has_pending = true;
-		restart_wanted = true;
+		restart_wanted = !started_with_list; //only a game that had no list at all needs the restart, otherwise the new points are applied in place
 	} catch(...) {
 	}
 }

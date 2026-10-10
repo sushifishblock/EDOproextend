@@ -4,6 +4,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <unordered_map>
 
 namespace ygo {
@@ -44,7 +45,7 @@ uint32_t WithAlpha(uint32_t color, uint32_t alpha) {
 // PR   a fine rainbow warp-and-weft weave over the whole card with a bright band of it sweeping across, pink wash
 // Gst  the picture fades into a bright ghost that pulses between pale cyan, lavender and blue, with mist and a glow
 // foils: smoke in two layers, a glowing edge, embers/glitter and a beam in the attribute color
-std::vector<Layer> BaseLayers(Rarity rarity) {
+static std::vector<Layer> BaseLayers(Rarity rarity) {
 	switch(rarity) {
 	case Rarity::SR:
 		return { { Pattern::BEAM, 0x80e8f0ff, 3.0f, 0.2f, 0, Region::ART }, { Pattern::RAYS, 0x30ffffff, 2.4f, 0.28f, 0, Region::ART },
@@ -95,14 +96,25 @@ void RegionFractions(Region region, float& x0, float& x1, float& y0, float& y1) 
 }
 
 //the parts of the card a region covers (x0, x1, y0, y1 as fractions); the border is four thin strips
-std::vector<std::array<float, 4>> RegionStrips(Region region) {
+struct StripList {
+	std::array<std::array<float, 4>, 4> items;
+	int count = 0;
+	const std::array<float, 4>* begin() const { return items.data(); }
+	const std::array<float, 4>* end() const { return items.data() + count; }
+};
+StripList RegionStrips(Region region) {
+	StripList list;
 	if(region == Region::BORDER) {
-		constexpr float t = 0.032f, s = 0.045f;
-		return { { 0, 1, 0, t }, { 0, 1, 1 - t, 1 }, { 0, s, t, 1 - t }, { 1 - s, 1, t, 1 - t } };
+		constexpr float t = 0.032f, sd = 0.045f;
+		list.items = { { { 0, 1, 0, t }, { 0, 1, 1 - t, 1 }, { 0, sd, t, 1 - t }, { 1 - sd, 1, t, 1 - t } } };
+		list.count = 4;
+		return list;
 	}
 	float x0, x1, y0, y1;
 	RegionFractions(region, x0, x1, y0, y1);
-	return { { x0, x1, y0, y1 } };
+	list.items[0] = { x0, x1, y0, y1 };
+	list.count = 1;
+	return list;
 }
 
 video::ITexture* patterns[static_cast<int>(Pattern::COUNT)] = {};
@@ -364,8 +376,10 @@ video::ITexture* MakePattern(video::IVideoDriver* driver, Pattern pattern) {
 
 video::ITexture* GetPattern(video::IVideoDriver* driver, Pattern pattern) {
 	if(patterns_driver != driver) {
+		//the old driver (and its textures) is gone
 		for(auto& t : patterns)
 			t = nullptr;
+		scaled_patterns.clear();
 		patterns_driver = driver;
 	}
 	auto& slot = patterns[static_cast<int>(pattern)];
@@ -385,7 +399,7 @@ video::ITexture* GetScaledPattern(video::IVideoDriver* driver, Pattern pattern, 
 	const auto found = scaled_patterns.find(key);
 	if(found != scaled_patterns.end())
 		return found->second;
-	if(scaled_patterns.size() > 96) {
+	if(scaled_patterns.size() > 200) {
 		for(auto& entry : scaled_patterns)
 			driver->removeTexture(entry.second);
 		scaled_patterns.clear();
@@ -429,6 +443,15 @@ video::ITexture* GetScaledPattern(video::IVideoDriver* driver, Pattern pattern, 
 	return texture;
 }
 
+//pattern tiles are made at a few sizes only (the draw stretches them a little), so the cache stays small
+int QuantizeSize(int size) {
+	static const int steps[] = { 16, 24, 32, 48, 64, 96, 128, 192, 256, 384 };
+	for(const int step : steps)
+		if(size <= step)
+			return step;
+	return 384;
+}
+
 float Wrap01(float v) {
 	v -= std::floor(v);
 	return v;
@@ -436,7 +459,7 @@ float Wrap01(float v) {
 
 //the color of a layer at a point in time (some layers move through colors)
 //the layers of a rarity: its own plus a holo border
-std::vector<Layer> LayersFor(Rarity rarity) {
+static std::vector<Layer> BuildLayers(Rarity rarity) {
 	auto layers = BaseLayers(rarity);
 	switch(rarity) {
 	case Rarity::SR:
@@ -461,6 +484,17 @@ std::vector<Layer> LayersFor(Rarity rarity) {
 		break;
 	}
 	return layers;
+}
+//the layers of a rarity are built once
+const std::vector<Layer>& LayersFor(Rarity rarity) {
+	static std::vector<Layer> cache[static_cast<int>(Rarity::COUNT)];
+	static bool built[static_cast<int>(Rarity::COUNT)] = {};
+	const int index = static_cast<int>(rarity);
+	if(!built[index]) {
+		cache[index] = BuildLayers(rarity);
+		built[index] = true;
+	}
+	return cache[index];
 }
 
 uint32_t LayerColor(const Layer& layer, double seconds) {
@@ -488,6 +522,28 @@ uint32_t ScaleAlpha(uint32_t color, uint32_t alpha) {
 }
 }
 
+namespace {
+//write to a temporary file and rename it over the target, so a crash cannot leave half a file
+void WriteFileAtomic(const std::filesystem::path& path, const std::string& content) {
+	std::filesystem::path temp = path;
+	temp += ".tmp";
+	{
+		std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+		if(!file.is_open())
+			return;
+		file << content;
+		if(!file.good())
+			return;
+	}
+	std::error_code ec;
+	std::filesystem::rename(temp, path, ec);
+	if(ec) {
+		std::filesystem::remove(path, ec);
+		std::filesystem::rename(temp, path, ec);
+	}
+}
+}
+
 void RarityFx::Load() {
 	chosen.clear();
 	std::ifstream file("rarities.txt");
@@ -500,9 +556,10 @@ void RarityFx::Load() {
 }
 
 void RarityFx::Save() {
-	std::ofstream file("rarities.txt", std::ios::trunc);
+	std::ostringstream out;
 	for(const auto& entry : chosen)
-		file << entry.first << " " << static_cast<int>(entry.second) << "\n";
+		out << entry.first << " " << static_cast<int>(entry.second) << "\n";
+	WriteFileAtomic("rarities.txt", out.str());
 }
 
 Rarity RarityFx::Get(uint32_t code) {
@@ -527,7 +584,7 @@ std::filesystem::path DeckFile(const std::wstring& name) {
 }
 
 Rarity RarityFx::DeckTable::Lookup(uint32_t code, int ordinal) const {
-	if(ordinal >= 0) {
+	if(per_copy && ordinal >= 0) {
 		const auto it = copies.find(code);
 		if(it != copies.end() && static_cast<size_t>(ordinal) < it->second.size() && it->second[ordinal] != 255)
 			return static_cast<Rarity>(it->second[ordinal]);
@@ -549,17 +606,18 @@ RarityFx::DeckTable RarityFx::LoadTable(const std::wstring& name) {
 			int v = 0; file >> v; table.per_copy = v != 0;
 		} else if(kind == "d") {
 			uint32_t code; int value;
-			if(file >> code >> value)
+			if(file >> code >> value && value >= 0 && value < static_cast<int>(Rarity::COUNT))
 				table.defaults[code] = static_cast<uint8_t>(value);
 		} else if(kind == "c") {
 			uint32_t code; int n;
 			if(!(file >> code >> n))
 				break;
 			auto& list = table.copies[code];
-			for(int i = 0; i < n && i < 200; ++i) {
+			for(int i = 0; i < n; ++i) {
 				int value = 255;
 				file >> value;
-				list.push_back(static_cast<uint8_t>(value));
+				if(i < 200)
+					list.push_back(value >= 0 && value < static_cast<int>(Rarity::COUNT) ? static_cast<uint8_t>(value) : static_cast<uint8_t>(255));
 			}
 		} else {
 			break;
@@ -576,17 +634,18 @@ void RarityFx::SaveTable(const std::wstring& name, const DeckTable& table) {
 		std::filesystem::remove(DeckFile(name), ec);
 		return;
 	}
-	std::ofstream file(DeckFile(name), std::ios::trunc);
-	file << "enabled " << (table.enabled ? 1 : 0) << '\n';
-	file << "percopy " << (table.per_copy ? 1 : 0) << '\n';
+	std::ostringstream out;
+	out << "enabled " << (table.enabled ? 1 : 0) << "\n";
+	out << "percopy " << (table.per_copy ? 1 : 0) << "\n";
 	for(const auto& entry : table.defaults)
-		file << "d " << entry.first << " " << static_cast<int>(entry.second) << '\n';
+		out << "d " << entry.first << " " << static_cast<int>(entry.second) << "\n";
 	for(const auto& entry : table.copies) {
-		file << "c " << entry.first << " " << entry.second.size();
+		out << "c " << entry.first << " " << entry.second.size();
 		for(const auto value : entry.second)
-			file << " " << static_cast<int>(value);
-		file << '\n';
+			out << " " << static_cast<int>(value);
+		out << "\n";
 	}
+	WriteFileAtomic(DeckFile(name), out.str());
 }
 
 void RarityFx::EditDeck(const std::wstring& name) {
@@ -595,9 +654,11 @@ void RarityFx::EditDeck(const std::wstring& name) {
 	edit_loaded = true;
 	edit_name = name;
 	edit = name.empty() ? DeckTable() : LoadTable(name);
+	++generation;
 }
 
 void RarityFx::SetDeckMode(bool on) {
+	++generation;
 	edit.enabled = on;
 	if(!on)
 		edit.per_copy = false;
@@ -605,6 +666,7 @@ void RarityFx::SetDeckMode(bool on) {
 }
 
 void RarityFx::SetPerCopy(bool on) {
+	++generation;
 	edit.per_copy = on && edit.enabled;
 	SaveTable(edit_name, edit);
 }
@@ -633,12 +695,14 @@ void RarityFx::SetFor(uint32_t code, int ordinal, Rarity rarity) {
 }
 
 void RarityFx::ResetDeck() {
+	++generation;
 	edit.defaults.clear();
 	edit.copies.clear();
 	SaveTable(edit_name, edit);
 }
 
 void RarityFx::ResetAll() {
+	++generation;
 	chosen.clear();
 	Save();
 	edit.defaults.clear();
@@ -647,10 +711,13 @@ void RarityFx::ResetAll() {
 	edit.per_copy = false;
 	duel_pool.clear();
 	std::error_code ec;
-	for(const auto& entry : std::filesystem::directory_iterator("deck", ec)) {
+	std::vector<std::filesystem::path> files;
+	for(const auto& entry : std::filesystem::recursive_directory_iterator("deck", ec)) {
 		if(entry.path().extension() == ".rarity")
-			std::filesystem::remove(entry.path(), ec);
+			files.push_back(entry.path());
 	}
+	for(const auto& file : files)
+		std::filesystem::remove(file, ec);
 }
 
 void RarityFx::SaveDeckAs(const std::wstring& name) {
@@ -670,6 +737,7 @@ void RarityFx::RenameDeck(const std::wstring& from, const std::wstring& to) {
 }
 
 void RarityFx::DeleteDeck(const std::wstring& name) {
+	++generation;
 	std::error_code ec;
 	std::filesystem::remove(DeckFile(name), ec);
 	if(edit_name == name)
@@ -738,7 +806,7 @@ void RarityFx::Draw2D(video::IVideoDriver* driver, const core::recti& card, Rari
 		}
 		const int tile = std::max(8, static_cast<int>((rotated ? h : w) * layer.tile));
 		//tiles up to 384 pixels are made at their real size, bigger (smooth) ones are stretched a little
-		const int made = std::min(tile, 384);
+		const int made = QuantizeSize(std::min(tile, 384));
 		auto* texture = GetScaledPattern(driver, layer.pattern, made);
 		if(!texture)
 			continue;
@@ -760,15 +828,16 @@ void RarityFx::Draw2D(video::IVideoDriver* driver, const core::recti& card, Rari
 	}
 	if(hovered && w >= 60) {
 		//a soft glint under the mouse
-		if(auto* glow = GetScaledPattern(driver, Pattern::GLOW, std::max(16, w / 2))) {
-			const int size = std::max(16, w / 2);
+		const int size = std::max(16, w / 2);
+		const int made = QuantizeSize(size);
+		if(auto* glow = GetScaledPattern(driver, Pattern::GLOW, made)) {
 			const core::recti dest(mouse_x - size / 2, mouse_y - size / 2, mouse_x + size / 2, mouse_y + size / 2);
 			core::recti limit = card;
 			if(clip)
 				limit.clipAgainst(*clip);
 			const video::SColor c(0x58ffffff);
 			const video::SColor colors[4] = { c, c, c, c };
-			driver->draw2DImage(glow, dest, core::recti(0, 0, size, size), &limit, colors, true);
+			driver->draw2DImage(glow, dest, core::recti(0, 0, made, made), &limit, colors, true);
 		}
 	}
 }
@@ -836,6 +905,8 @@ void RarityFx::Draw3D(video::IVideoDriver* driver, const video::SMaterial& base,
 		if(!texture)
 			continue;
 		//the card front is 0.7 x 1.0, the picture a part of it (texture top is at y = -0.5)
+		video::SMaterial material = base;
+		material.setTexture(0, texture);
 		for(const auto& strip : RegionStrips(layer.region)) {
 		const float fx0 = strip[0], fx1 = strip[1], fy0 = strip[2], fy1 = strip[3];
 		const float x0 = -0.35f + fx0 * 0.7f, x1 = -0.35f + fx1 * 0.7f;
@@ -853,8 +924,6 @@ void RarityFx::Draw3D(video::IVideoDriver* driver, const video::SMaterial& base,
 			video::S3DVertex(x0, y1, z, 0, 0, 1, color, u0, v0 + rv),
 			video::S3DVertex(x1, y1, z, 0, 0, 1, color, u0 + ru, v0 + rv),
 		};
-		video::SMaterial material = base;
-		material.setTexture(0, texture);
 		driver->setMaterial(material);
 		driver->drawVertexPrimitiveList(v, 4, indices, 2);
 		}

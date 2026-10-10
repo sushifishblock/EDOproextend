@@ -76,6 +76,8 @@ public:
 	void SetCurrentDeck(Deck new_deck) {
 		current_deck = std::move(new_deck);
 		RefreshLimitationStatus();
+		if(browser_mode)
+			RefreshBrowserResults();
 	}
 	void StartFilter(bool force_refresh = false);
 	void RefreshCurrentDeck();

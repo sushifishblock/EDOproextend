@@ -72,6 +72,7 @@ private:
 	};
 	struct Process;
 	void WorkerLoop();
+	void WorkerLoopBody();
 	void SetStatus(std::wstring status);
 	bool EnsureServers();
 	bool WaitForServer(int port, const std::chrono::seconds& timeout);

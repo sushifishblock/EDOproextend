@@ -98,7 +98,7 @@ void Add(std::map<uint32_t, Entry>& map, const Deck::Vector& pile, bool mine) {
 	for(const auto* card : pile) {
 		if(!card)
 			continue;
-		const uint32_t key = card->getRealCode();
+		const uint32_t key = !card->code ? card->alias : (CardDataC::IsInArtworkOffsetRange(card) ? card->alias : card->code);
 		auto& entry = map[key];
 		if(entry.name.empty()) {
 			const auto name = gDataManager->GetName(key);

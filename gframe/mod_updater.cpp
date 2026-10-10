@@ -27,7 +27,7 @@ size_t WriteFile(char* data, size_t size, size_t count, void* user) {
 }
 int Progress(void* user, curl_off_t total, curl_off_t now, curl_off_t, curl_off_t) {
 	if(total > 0)
-		*static_cast<int*>(user) = static_cast<int>(now * 100 / total);
+		static_cast<std::atomic<int>*>(user)->store(static_cast<int>(now * 100 / total));
 	return 0;
 }
 
@@ -37,6 +37,9 @@ void SetCommon(CURL* curl, const std::string& url) {
 	curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
+	curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
+	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https");
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 	if(ygo::gGameConfig->ssl_certificate_path.size() && Utils::FileExists(Utils::ToPathString(ygo::gGameConfig->ssl_certificate_path)))
 		curl_easy_setopt(curl, CURLOPT_CAINFO, ygo::gGameConfig->ssl_certificate_path.data());
@@ -48,8 +51,11 @@ std::vector<int> ParseVersion(const std::string& text) {
 	int value = 0;
 	bool have = false;
 	for(const char c : text) {
+		if(c == '-' || c == '+')
+			break; //"1.4.0-beta" is not newer than "1.4.0"
 		if(c >= '0' && c <= '9') {
-			value = value * 10 + (c - '0');
+			if(value < 100000)
+				value = value * 10 + (c - '0');
 			have = true;
 		} else if(c == '.') {
 			parts.push_back(value);
@@ -74,6 +80,8 @@ std::filesystem::path ExePath() {
 #ifdef _WIN32
 	wchar_t buffer[MAX_PATH * 2];
 	const auto length = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
+	if(length == 0 || length >= std::size(buffer))
+		return {};
 	return std::filesystem::path(std::wstring(buffer, length));
 #else
 	return {};
@@ -87,6 +95,7 @@ void ModUpdater::CleanupOld() {
 	if(exe.empty())
 		return;
 	std::filesystem::remove(exe.wstring() + L".old", ec);
+	std::filesystem::remove(exe.wstring() + L".new", ec);
 }
 
 void ModUpdater::StartCheck() {
@@ -125,9 +134,14 @@ void ModUpdater::CheckThread() {
 		for(const auto& asset : root.at("assets")) {
 			if(asset.at("name").get<std::string>() == ASSET_NAME) {
 				std::lock_guard<std::mutex> lock(info_mutex);
+				const std::string url = asset.at("browser_download_url").get<std::string>();
+				const long long size = asset.at("size").get<long long>();
+				//only a file of this project's releases, with a plausible size
+				if(url.rfind("https://github.com/sushifishblock/EDOproextend/releases/", 0) != 0 || size < 5ll * 1024 * 1024 || size > 200ll * 1024 * 1024)
+					break;
 				latest_tag = tag;
-				asset_url = asset.at("browser_download_url").get<std::string>();
-				asset_size = asset.at("size").get<long long>();
+				asset_url = url;
+				asset_size = size;
 				state = AVAILABLE;
 				return;
 			}
@@ -176,7 +190,6 @@ void ModUpdater::InstallThread() {
 				fclose(file);
 				throw std::runtime_error("curl");
 			}
-			int progress = 0;
 			SetCommon(curl, url);
 			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteFile);
 			curl_easy_setopt(curl, CURLOPT_WRITEDATA, file);
@@ -184,21 +197,11 @@ void ModUpdater::InstallThread() {
 			curl_easy_setopt(curl, CURLOPT_TIMEOUT, 900L);
 			curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 			curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, Progress);
-			curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
-			//publish the percentage while downloading
-			std::atomic<bool> done{ false };
-			std::thread reporter([&] {
-				while(!done) {
-					percent = progress;
-					std::this_thread::sleep_for(std::chrono::milliseconds(100));
-				}
-			});
+			curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &percent);
 			const auto result = curl_easy_perform(curl);
-			done = true;
-			reporter.join();
 			curl_easy_cleanup(curl);
-			fclose(file);
-			if(result != CURLE_OK)
+			const bool closed = fclose(file) == 0;
+			if(result != CURLE_OK || !closed)
 				throw std::runtime_error("download");
 		}
 		//sanity: size, and it must be a Windows executable
@@ -232,6 +235,8 @@ void ModUpdater::InstallThread() {
 		percent = 100;
 		state = RESTART;
 	} catch(...) {
+		std::error_code ignore;
+		std::filesystem::remove(std::filesystem::path(ExePath().wstring() + L".new"), ignore);
 		state = FAILED;
 	}
 }

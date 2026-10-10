@@ -533,6 +533,8 @@ void ImageManager::TrimCardTextures(size_t budget_bytes, const std::unordered_se
 	const size_t max_loaded = std::max<size_t>(budget_bytes / per_texture, keep.size() + 16);
 	size_t loaded = 0;
 	std::vector<std::pair<uint64_t, uint32_t>> evictable;
+	if(map.size() > max_loaded) { //(only then can the cache be over budget)
+	evictable.reserve(map.size());
 	for(const auto& entry : map) {
 		if(entry.second.preload_status != preloadStatus::LOADED || !entry.second.texture)
 			continue;
@@ -555,6 +557,7 @@ void ImageManager::TrimCardTextures(size_t budget_bytes, const std::unordered_se
 			card_last_use.erase(victim.second);
 			loaded--;
 		}
+	}
 	}
 	//the large pictures (info panel, sharp card browser cells): keep the ones on screen and drop the rest
 	auto& info_map = tMap[1];

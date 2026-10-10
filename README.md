@@ -27,7 +27,7 @@ The AI models and card art are not in this repository. If the `ai` folder is mis
 
 ## Installing (also for friends)
 
-Download `EDOproextend-1.3.1-x64-full.zip` from the [Releases](../../releases) page, extract the whole zip (do not run it from inside the zip viewer) and start `EDOPro.exe`. It is the normal EDOPro 41.0.2 game files with my 64-bit exe and a 64-bit `ocgcore.dll` already in place, so nothing else has to be installed. The first start needs internet (card data and pictures are downloaded by the game).
+Download `EDOproextend-1.3.2-x64-full.zip` from the [Releases](../../releases) page, extract the whole zip (do not run it from inside the zip viewer) and start `EDOPro.exe`. It is the normal EDOPro 41.0.2 game files with my 64-bit exe and a 64-bit `ocgcore.dll` already in place, so nothing else has to be installed. The first start needs internet (card data and pictures are downloaded by the game).
 
 To update only the mod later, use the "Update available" button on the main menu (v1.3 and newer), or replace `EDOPro.exe` with the one from `release/` in this repository.
 

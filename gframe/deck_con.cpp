@@ -276,6 +276,8 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				mainGame->rarityUiSig = 0;
 				mainGame->browserRarityTarget = 0;
 				mainGame->rarityLockCode = 0;
+				mainGame->stBrowserRarity->setText(L"Rarity");
+				mainGame->stBrowserRarity->setOverrideColor(0xffffd54a);
 				if(browser_mode)
 					RefreshBrowserResults();
 				break;
@@ -1634,6 +1636,8 @@ void DeckBuilder::ClearDeck() {
 	side_monster_count = 0;
 	side_spell_count = 0;
 	side_trap_count = 0;
+	if(browser_mode)
+		RefreshBrowserResults();
 }
 void DeckBuilder::RefreshLimitationStatus() {
 	main_and_extra_legend_count_monster = DeckManager::CountLegends(current_deck.main, TYPE_MONSTER) + DeckManager::CountLegends(current_deck.extra, TYPE_MONSTER);
@@ -2106,7 +2110,10 @@ bool DeckBuilder::OnBrowserMouse(const irr::SEvent& event) {
 		const uint32_t now = mainGame->device->getTimer()->getRealTime();
 		browser_pinned_code = pointer->code;
 		if(event.MouseInput.Shift) {
-			SetCopies(pointer, GetCardLimit(pointer));
+			if(const int limit = GetCardLimit(pointer))
+				SetCopies(pointer, limit);
+			else
+				AddCopy(pointer, false);
 			browser_last_click_code = 0;
 		} else if(browser_last_click_code == pointer->code && now - browser_last_click_time < 400) {
 			AddCopy(pointer, gGameConfig->ignoreDeckContents);

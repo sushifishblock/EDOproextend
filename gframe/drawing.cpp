@@ -1224,6 +1224,7 @@ void Game::WaitFrameSignal(int frame, std::unique_lock<epro::mutex>& _lck) {
 	frameSignal.Wait(_lck);
 }
 void Game::DrawThumb(const CardDataC* cp, irr::core::vector2di pos, LFList* lflist, bool drag, const irr::core::recti* cliprect, bool load_image) {
+	const int thumb_override = std::exchange(thumbRarityOverride, -1);
 	auto code = cp->code;
 	auto flit = lflist->GetLimitationIterator(cp);
 	int count = 3;
@@ -1248,11 +1249,10 @@ void Game::DrawThumb(const CardDataC* cp, irr::core::vector2di pos, LFList* lfli
 	}
 	driver->draw2DImage(img, dragloc, irr::core::recti(0, 0, size.Width, size.Height), cliprect);
 	if(load_image) {
-		const auto rarity = thumbRarityOverride >= 0 ? static_cast<Rarity>(thumbRarityOverride) : RarityFx::GetFor(code, -1);
+		const auto rarity = thumb_override >= 0 ? static_cast<Rarity>(thumb_override) : RarityFx::GetFor(code, -1);
 		if(rarity != Rarity::NORMAL)
 			RarityFx::Draw2D(driver, dragloc, rarity, device->getTimer()->getTime(), cliprect);
 	}
-	thumbRarityOverride = -1;
 	if(Genesys::enabled) {
 		if(const int pts = Genesys::Points(cp); pts > 0 && !Genesys::Illegal(cp)) {
 			DrawGenesysBadge(dragloc, pts, cliprect);
@@ -1383,7 +1383,7 @@ void Game::DrawDeckBd() {
 	const auto& current_deck = deckBuilder.GetCurrentDeck();
 	//the rarity of every copy in the deck (copies of a card are counted main, extra, side)
 	std::vector<int> rarity_of[3];
-	{
+	if(RarityFx::DeckMode()) {
 		std::map<uint32_t, int> seen;
 		const Deck::Vector* piles[3] = { &current_deck.main, &current_deck.extra, &current_deck.side };
 		for(int p = 0; p < 3; ++p) {
@@ -1424,7 +1424,7 @@ void Game::DrawDeckBd() {
 		const float dx = 436.0f / (cards_per_row - 1);
 
 		for(int i = 0; i < static_cast<int>(current_deck.main.size()); ++i) {
-			thumbRarityOverride = rarity_of[0][i];
+			thumbRarityOverride = static_cast<size_t>(i) < rarity_of[0].size() ? rarity_of[0][i] : -1;
 			DrawThumb(current_deck.main[i], irr::core::vector2di(314 + (i % cards_per_row) * dx, 164 + (i / cards_per_row) * 68), deckBuilder.filterList);
 			if(deckBuilder.hovered_pos == 1 && deckBuilder.hovered_seq == i)
 				driver->draw2DRectangleOutline(Resize(313 + (i % cards_per_row) * dx, 163 + (i / cards_per_row) * 68, 359 + (i % cards_per_row) * dx, 228 + (i / cards_per_row) * 68), skin::DECK_WINDOW_HOVERED_CARD_OUTLINE_VAL);
@@ -1460,7 +1460,7 @@ void Game::DrawDeckBd() {
 		const float dx = (current_deck.extra.size() <= 10) ? (436.0f / 9.0f) : (436.0f / (current_deck.extra.size() - 1));
 
 		for(size_t i = 0; i < current_deck.extra.size(); ++i) {
-			thumbRarityOverride = rarity_of[1][i];
+			thumbRarityOverride = static_cast<size_t>(i) < rarity_of[1].size() ? rarity_of[1][i] : -1;
 			DrawThumb(current_deck.extra[i], irr::core::vector2di(314 + i * dx, 466), deckBuilder.filterList);
 			if(deckBuilder.hovered_pos == 2 && deckBuilder.hovered_seq == (int)i)
 				driver->draw2DRectangleOutline(Resize(313 + i * dx, 465, 359 + i * dx, 531), skin::DECK_WINDOW_HOVERED_CARD_OUTLINE_VAL);
@@ -1493,7 +1493,7 @@ void Game::DrawDeckBd() {
 		const float dx = (current_deck.side.size() <= 10) ? (436.0f / 9.0f) : (436.0f / (current_deck.side.size() - 1));
 
 		for(size_t i = 0; i < current_deck.side.size(); ++i) {
-			thumbRarityOverride = rarity_of[2][i];
+			thumbRarityOverride = static_cast<size_t>(i) < rarity_of[2].size() ? rarity_of[2][i] : -1;
 			DrawThumb(current_deck.side[i], irr::core::vector2di(314 + i * dx, 564), deckBuilder.filterList);
 			if(deckBuilder.hovered_pos == 3 && deckBuilder.hovered_seq == (int)i)
 				driver->draw2DRectangleOutline(Resize(313 + i * dx, 563, 359 + i * dx, 629), skin::DECK_WINDOW_HOVERED_CARD_OUTLINE_VAL);
@@ -1714,8 +1714,12 @@ void Game::DrawRarityPreview() {
 		btnRarityResetDeck->setText(L"Reset deck");
 		btnRarityResetAll->setText(L"Reset all");
 	}
-	if(mode != 2)
+	if(rarityLockCode && (mode != 2 || rarityLockGen != RarityFx::Generation())) {
+		//left the editor, or another deck / mode: the locked copy may not exist any more
 		rarityLockCode = 0;
+		stBrowserRarity->setText(L"Rarity");
+		stBrowserRarity->setOverrideColor(0xffffd54a);
+	}
 	if(mode == 2) {
 		const auto& deck = deckBuilder.GetCurrentDeck();
 		const int pile = deckBuilder.hovered_pos - 1;
@@ -1726,6 +1730,7 @@ void Game::DrawRarityPreview() {
 				rarityLockCode = 0;
 			} else if(deckBuilder.hovered_code) {
 				rarityLockCode = deckBuilder.hovered_code;
+				rarityLockGen = RarityFx::Generation();
 				rarityLockOrdinal = pile >= 0 && pile <= 2 ? DeckCopyOrdinal(deck, pile, deckBuilder.hovered_seq) : -1;
 				if(showingcard != rarityLockCode)
 					ShowCardInfo(rarityLockCode);
@@ -1745,7 +1750,7 @@ void Game::DrawRarityPreview() {
 		rarityLockToggle = false;
 	}
 	if(mode != 0) {
-		const uint64_t sig = (((static_cast<uint64_t>(rarityLockCode ? rarityLockCode : showingcard)) << 8) ^ (static_cast<uint64_t>(rarityCopyOrdinal + 1) << 40) ^ (RarityFx::DeckMode() ? 1 : 0) ^ (RarityFx::PerCopy() ? 2 : 0) ^ (static_cast<uint64_t>(mode) << 4)) | 0x8000000000000000ull;
+		const uint64_t sig = (((static_cast<uint64_t>(rarityLockCode ? rarityLockCode : showingcard)) << 8) ^ (static_cast<uint64_t>(rarityCopyOrdinal + 1) << 40) ^ (RarityFx::DeckMode() ? 1 : 0) ^ (RarityFx::PerCopy() ? 2 : 0) ^ (static_cast<uint64_t>(mode) << 4) ^ (static_cast<uint64_t>(RarityFx::Generation() & 0x7fff) << 48)) | 0x8000000000000000ull;
 		if(sig != rarityUiSig) {
 			rarityUiSig = sig;
 			chkRarityDeck->setChecked(RarityFx::DeckMode());
@@ -1855,18 +1860,23 @@ void Game::UpdateArtPreload() {
 	imageManager.SetUploadBudget((artPreloadCursor < artPreloadCodes.size() || imageManager.PendingCardLoads() > 0) ? 20 : 6);
 	imageManager.EnsureLocalPictureIndex();
 	int steps = 500;
-	while(steps > 0 && artPreloadCursor < artPreloadCodes.size() && imageManager.PendingCardLoads() < 1500) {
+	size_t pending = imageManager.PendingCardLoads(); //read once (it takes a lock), counted up locally
+	while(steps > 0 && artPreloadCursor < artPreloadCodes.size() && pending < 1500) {
 		const uint32_t code = artPreloadCodes[artPreloadCursor++];
 		//only cards that already have a picture on disk, this never starts a download
-		if(imageManager.HasLocalCardPicture(code))
+		if(imageManager.HasLocalCardPicture(code)) {
 			imageManager.GetTextureCard(code, imgType::ART);
+			++pending;
+		}
 		steps--;
 	}
 	//then the small pictures of the deck editor's card list and deck (made from the cached art, so this is quick)
-	while(steps > 0 && artPreloadCursor >= artPreloadCodes.size() && thumbPreloadCursor < artPreloadCodes.size() && imageManager.PendingCardLoads() < 1500) {
+	while(steps > 0 && artPreloadCursor >= artPreloadCodes.size() && thumbPreloadCursor < artPreloadCodes.size() && pending < 1500) {
 		const uint32_t code = artPreloadCodes[thumbPreloadCursor++];
-		if(imageManager.HasLocalCardPicture(code))
+		if(imageManager.HasLocalCardPicture(code)) {
 			imageManager.GetTextureCard(code, imgType::THUMB);
+			++pending;
+		}
 		steps--;
 	}
 }
@@ -1891,6 +1901,8 @@ void Game::DrawArtPreloadStatus() {
 	DrawShadowText(textFont, label, irr::core::recti(box.UpperLeftCorner.X, Scale(612), box.LowerRightCorner.X, Scale(632)), Resize(1, 1, 1, 1), 0xffffffff, 0xff000000, true, true);
 }
 void Game::SetBrowserWidgetsVisible(bool visible) {
+	if(!visible && env->getFocus() == ebAiQuery)
+		env->setFocus(0);
 	stBrowserCopies->setVisible(visible);
 	stBrowserCount->setVisible(visible);
 	btnBrowserMinus->setVisible(visible);
@@ -2107,7 +2119,23 @@ void Game::DrawCardBrowser() {
 void Game::DrawDeckTools() {
 	if(!wDeckStats || !wDeckStats->isVisible())
 		return;
-	const auto s = DeckStats::Compute(deckBuilder.GetCurrentDeck());
+	static uint64_t stats_signature = 0;
+	static DeckStats stats_cache;
+	{
+		//a hash of the deck: the numbers are only recomputed when it changes
+		uint64_t hash = 1469598103934665603ull;
+		const auto& deck = deckBuilder.GetCurrentDeck();
+		for(const auto* pile : { &deck.main, &deck.extra, &deck.side }) {
+			for(const auto* card : *pile)
+				hash = (hash ^ card->getRealCode()) * 1099511628211ull;
+			hash = (hash ^ 0xffffffffull) * 1099511628211ull;
+		}
+		if(hash != stats_signature || stats_cache.main_total != static_cast<int>(deck.main.size())) {
+			stats_signature = hash;
+			stats_cache = DeckStats::Compute(deck);
+		}
+	}
+	const auto& s = stats_cache;
 	const auto win = wDeckStats->getAbsolutePosition();
 	const float sx = win.getWidth() / 560.0f, sy = win.getHeight() / 540.0f;
 	const auto R = [&](int x0, int y0, int x1, int y1) {

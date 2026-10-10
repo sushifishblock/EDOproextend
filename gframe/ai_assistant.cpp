@@ -136,7 +136,13 @@ std::string BuildDocument(const AiCard& card) {
 		else
 			doc += " ATK " + stat(card.attack) + " / DEF " + stat(card.defense) + ".";
 	}
-	doc += " " + card.text.substr(0, 1500);
+	{
+		//cut the text at a character boundary (a cut in the middle of a UTF-8 character makes the JSON invalid)
+		size_t n = std::min<size_t>(card.text.size(), 1500);
+		while(n > 0 && n < card.text.size() && (static_cast<uint8_t>(card.text[n]) & 0xC0) == 0x80)
+			--n;
+		doc += " " + card.text.substr(0, n);
+	}
 	return doc;
 }
 
@@ -630,7 +636,7 @@ bool AiAssistant::EmbedTexts(const std::vector<std::string>& texts, std::vector<
 	nlohmann::json body;
 	body["input"] = texts;
 	body["model"] = "embedding";
-	const std::string request = body.dump();
+	const std::string request = body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 	std::string response;
 	long http_status = 0;
 	if(!HttpRequest(EMBED_PORT, "/v1/embeddings", &request, 300, response, http_status) || http_status != 200)
@@ -724,7 +730,7 @@ bool AiAssistant::SaveIndex() {
 	   || !write("embeddings.f32", embeddings.data(), embeddings.size() * sizeof(float)))
 		return false;
 	const nlohmann::json meta = { { "version", INDEX_VERSION }, { "dimension", dimension }, { "count", count } };
-	const std::string meta_text = meta.dump();
+	const std::string meta_text = meta.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 	return write("meta.json", meta_text.data(), meta_text.size());
 }
 
@@ -858,7 +864,7 @@ AiResult AiAssistant::HandleAsk(const AskTask& task) {
 		res.message = L"The AI search schema file is invalid.";
 		return res;
 	}
-	const std::string request = body.dump();
+	const std::string request = body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 	std::string response;
 	long http_status = 0;
 	if(!HttpRequest(CHAT_PORT, "/v1/chat/completions", &request, 120, response, http_status) || http_status != 200) {
@@ -937,6 +943,21 @@ AiResult AiAssistant::HandleAsk(const AskTask& task) {
 }
 
 void AiAssistant::WorkerLoop() {
+	//an exception inside the worker would end the whole program: keep going instead
+	while(true) {
+		try {
+			WorkerLoopBody();
+			return;
+		} catch(...) {
+			std::unique_lock<std::mutex> lock(mutex);
+			if(quit)
+				return;
+			cv.wait_for(lock, std::chrono::seconds(1));
+		}
+	}
+}
+
+void AiAssistant::WorkerLoopBody() {
 	while(true) {
 		AskTask task;
 		bool have_task = false;

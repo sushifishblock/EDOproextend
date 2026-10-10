@@ -80,7 +80,7 @@ void Popularity::UpdateThread() {
 	try {
 		std::unordered_map<uint32_t, int> fresh;
 		std::string body;
-		for(int skip = 0;; skip += PAGE_SIZE) {
+		for(int skip = 0, pages = 0; pages < 40; skip += PAGE_SIZE, ++pages) {
 			if(!Download("https://www.yugiohmeta.com/api/v1/cards?limit=" + std::to_string(PAGE_SIZE) + "&skip=" + std::to_string(skip), body)) {
 				std::ofstream("popularity_update.log", std::ios::trunc) << "download failed at card " << skip << std::endl;
 				return;
@@ -91,7 +91,8 @@ void Popularity::UpdateThread() {
 					continue;
 				uint32_t code = 0;
 				try {
-					code = static_cast<uint32_t>(std::stoul(card["konamiID"].get<std::string>()));
+					const auto& id = card["konamiID"];
+					code = id.is_string() ? static_cast<uint32_t>(std::stoul(id.get<std::string>())) : static_cast<uint32_t>(id.get<uint32_t>());
 				} catch(...) {
 					continue;
 				}

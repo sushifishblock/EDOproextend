@@ -42,6 +42,8 @@ public:
 	//Anything not set there falls back to the global choice.
 	static void EditDeck(const std::wstring& name); //the deck the editor works on (called every frame, cheap)
 	static bool DeckMode() { return edit.enabled; }
+	//changes whenever the deck table the UI shows was switched, reset or edited from outside the picker
+	static uint32_t Generation() { return generation; }
 	static bool PerCopy() { return edit.per_copy; }
 	static void SetDeckMode(bool on);
 	static void SetPerCopy(bool on);
@@ -70,6 +72,7 @@ private:
 	static inline DeckTable edit;
 	static inline std::wstring edit_name;
 	static inline bool edit_loaded = false;
+	static inline uint32_t generation = 0;
 	static inline std::map<uint32_t, std::deque<Rarity>> duel_pool;
 	static inline std::wstring duel_name;
 	static inline int mouse_x = -10000, mouse_y = -10000;

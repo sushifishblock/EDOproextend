@@ -45,7 +45,9 @@ void AppendList(const char* path, const std::vector<uint32_t>& codes) {
 }
 
 bool LooksLikeJpeg(const std::string& body) {
-	return body.size() > 2000 && static_cast<uint8_t>(body[0]) == 0xff && static_cast<uint8_t>(body[1]) == 0xd8;
+	//start and end markers: a download cut short is not saved
+	return body.size() > 2000 && static_cast<uint8_t>(body[0]) == 0xff && static_cast<uint8_t>(body[1]) == 0xd8
+		&& static_cast<uint8_t>(body[body.size() - 2]) == 0xff && static_cast<uint8_t>(body[body.size() - 1]) == 0xd9;
 }
 
 size_t WriteBody(char* data, size_t size, size_t count, void* user) {
@@ -98,6 +100,14 @@ double ArtSync::ElapsedSeconds() const {
 }
 
 void ArtSync::Run() {
+	try {
+		RunInner();
+	} catch(...) {
+		finished = true;
+	}
+}
+
+void ArtSync::RunInner() {
 	using clock = std::chrono::steady_clock;
 	std::error_code ec;
 	std::filesystem::create_directories("pics/temp", ec);
@@ -115,7 +125,6 @@ void ArtSync::Run() {
 	};
 	std::vector<Delayed> delayed;
 	std::vector<std::unique_ptr<Transfer>> storage;
-	std::vector<Transfer*> idle;
 	std::unordered_map<CURL*, Transfer*> active;
 	for(const auto& job : jobs) {
 		storage.push_back(std::make_unique<Transfer>());
@@ -138,11 +147,17 @@ void ArtSync::Run() {
 	clock::time_point last_flush = clock::now();
 	int network_failures = 0;
 	double rate = REQUESTS_PER_SECOND;
+	clock::time_point last_halved = clock::now() - std::chrono::seconds(60);
 	auto interval = std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / rate));
 
 	auto finish_job = [&](Transfer* transfer) {
 		processed++;
-		idle.push_back(transfer);
+		//the connection stays in the multi handle's pool; the handle and the picture buffer are not needed any more
+		if(transfer->easy) {
+			curl_easy_cleanup(transfer->easy);
+			transfer->easy = nullptr;
+		}
+		std::string().swap(transfer->body);
 	};
 	auto retry_or_fail = [&](Transfer* transfer, bool network_error) {
 		if(network_error)
@@ -235,6 +250,11 @@ void ArtSync::Run() {
 					downloaded++;
 					network_failures = 0;
 					last_success = clock::now();
+					if(rate < REQUESTS_PER_SECOND) {
+						//slowly speed up again after a slow-down
+						rate = std::min(REQUESTS_PER_SECOND, rate * 1.01);
+						interval = std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / rate));
+					}
 					if(!transfer->fallback)
 						done_codes.push_back(transfer->job.code);
 					finish_job(transfer);
@@ -258,10 +278,13 @@ void ArtSync::Run() {
 				finish_job(transfer);
 			} else {
 				if(result == CURLE_OK && (status == 429 || status == 403 || status == 503 || status == 200)) {
-					//the server is pushing back (or sent an error page): pause and halve the speed
-					next_start = clock::now() + std::chrono::seconds(10);
-					rate = std::max(MIN_REQUESTS_PER_SECOND, rate / 2);
-					interval = std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / rate));
+					//the server is pushing back (or sent an error page): pause and halve the speed, once per burst of errors
+					if(clock::now() - last_halved > std::chrono::seconds(8)) {
+						last_halved = clock::now();
+						next_start = clock::now() + std::chrono::seconds(10);
+						rate = std::max(MIN_REQUESTS_PER_SECOND, rate / 2);
+						interval = std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / rate));
+					}
 				}
 				retry_or_fail(transfer, result != CURLE_OK);
 			}
@@ -278,6 +301,8 @@ void ArtSync::Run() {
 			break; //nothing left that could finish (should not happen)
 		if(running == 0 && active.empty() && !waiting.empty() && clock::now() < next_start)
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		else if(active.empty() && !delayed.empty())
+			std::this_thread::sleep_for(std::chrono::milliseconds(20)); //only waiting for retries: do not spin
 	}
 	flush_lists();
 	for(auto& entry : active)

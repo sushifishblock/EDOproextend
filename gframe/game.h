@@ -215,6 +215,7 @@ struct main_menu_panel_elements {
 	size_t thumbPreloadCursor = 0;
 	uint32_t browserRarityTarget = 0;
 	int rarityUiMode = 0;
+	uint32_t rarityLockGen = 0;
 	uint32_t rarityLockCode = 0; //Z in the deck editor locks the rarity picker onto the hovered card (and copy)
 	int rarityLockOrdinal = -1;
 	bool rarityLockToggle = false;

@@ -582,8 +582,8 @@ void Game::Initialize() {
 	btnArtSyncContinue->setVisible(false);
 	btnModUpdate = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 492, mainMenuRightX + 40, 524), 0, BUTTON_MOD_UPDATE, L""));
 	btnModUpdate->setVisible(false);
-	btnDeckStats = AlignElementWithParent(env->addButton(Scale(450, 538, 520, 556), 0, BUTTON_DECK_STATS, L"Stats"));
-	btnDeckDiff = AlignElementWithParent(env->addButton(Scale(525, 538, 595, 556), 0, BUTTON_DECK_DIFF, L"Compare"));
+	btnDeckStats = AlignElementWithParent(env->addButton(Scale(530, 538, 595, 556), 0, BUTTON_DECK_STATS, L"Stats"));
+	btnDeckDiff = AlignElementWithParent(env->addButton(Scale(600, 538, 670, 556), 0, BUTTON_DECK_DIFF, L"Compare"));
 	btnDeckStats->setVisible(false);
 	btnDeckDiff->setVisible(false);
 	wDeckStats = env->addWindow(Scale(232, 50, 792, 590), false, L"Deck statistics");
@@ -3042,7 +3042,7 @@ void Game::RefreshCardInfoTextPositions() {
 	offsetIfVisibleWithContent(stSetName);
 	offsetIfVisibleWithContent(stPasscodeScope);
 	const int reserved = deckBuilder.browser_mode ? ResizeY(140) : (is_building || is_siding) ? ResizeY(106) : Scale(1);
-	stText->setRelativePosition(irr::core::recti(xLeft, offset, xRight, stText->getParent()->getAbsolutePosition().getHeight() - reserved));
+	stText->setRelativePosition(irr::core::recti(xLeft, offset, xRight, std::max(offset + Scale(20), stText->getParent()->getAbsolutePosition().getHeight() - reserved)));
 	if(deckBuilder.browser_mode) {
 		//keep the browser controls pinned to the bottom of the info tab
 		const int height = stText->getParent()->getAbsolutePosition().getHeight();
