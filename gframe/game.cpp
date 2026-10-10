@@ -582,6 +582,9 @@ void Game::Initialize() {
 	btnArtSyncContinue->setVisible(false);
 	btnModUpdate = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 492, mainMenuRightX + 40, 524), 0, BUTTON_MOD_UPDATE, L""));
 	btnModUpdate->setVisible(false);
+	btnRarityPack = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 530, mainMenuRightX + 40, 562), 0, BUTTON_RARITY_PACK, L""));
+	btnRarityPack->setVisible(false);
+	RarityPack::StartCheck();
 	btnDeckStats = AlignElementWithParent(env->addButton(Scale(530, 538, 595, 556), 0, BUTTON_DECK_STATS, L"Stats"));
 	btnDeckDiff = AlignElementWithParent(env->addButton(Scale(600, 538, 670, 556), 0, BUTTON_DECK_DIFF, L"Compare"));
 	btnDeckStats->setVisible(false);
@@ -2130,6 +2133,22 @@ bool Game::MainLoop() {
 					modUpdateLabel = label;
 					btnModUpdate->setText(label.data());
 				}
+			}
+			{
+				//the rarities of the author: a button while a new pack is waiting
+				const auto pack_state = RarityPack::GetState();
+				const bool show_pack = wMainMenu->isVisible() && (pack_state == RarityPack::AVAILABLE || pack_state == RarityPack::DOWNLOADING || pack_state == RarityPack::FAILED || RarityPack::RecentlyDone());
+				if(show_pack != btnRarityPack->isVisible())
+					btnRarityPack->setVisible(show_pack);
+				if(show_pack) {
+					const auto label = RarityPack::Label();
+					if(label != rarityPackLabel) {
+						rarityPackLabel = label;
+						btnRarityPack->setText(label.data());
+					}
+				}
+				if(RarityPack::TakeInstalled())
+					RarityFx::ReloadFiles();
 			}
 			if(update_state == ModUpdater::RESTART && !modUpdateLaunched) {
 				modUpdateLaunched = true;

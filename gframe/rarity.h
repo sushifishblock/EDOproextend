@@ -33,6 +33,8 @@ public:
 	static uint32_t DefsGeneration();
 	//call every frame: reloads custom_rarities.json when it changed (checked once a second)
 	static void CheckReload(uint32_t now_ms);
+	//the rarity files were replaced (a rarity pack was installed): read them again
+	static void ReloadFiles();
 	//2D: the effect over a card picture drawn in `card` (browser grid, card preview)
 	static void Draw2D(irr::video::IVideoDriver* driver, const irr::core::recti& card, Rarity rarity, uint32_t time_ms, const irr::core::recti* clip, bool rotated = false);
 	//3D: the effect over the front of a card in a duel; `world` is the card's transform (already set), alpha 0-255

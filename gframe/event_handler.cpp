@@ -1876,6 +1876,10 @@ bool ClientField::OnCommonEvent(const irr::SEvent& event, bool& stopPropagation)
 				mainGame->env->setFocus(mainGame->gSettings.window);
 				break;
 			}
+			case BUTTON_RARITY_PACK: {
+				RarityPack::BeginInstall();
+				break;
+			}
 			case BUTTON_MOD_UPDATE: {
 				ModUpdater::BeginInstall();
 				break;

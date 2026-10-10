@@ -1,5 +1,7 @@
 #include "mod_updater.h"
+#include <chrono>
 #include <cstdio>
+#include <fstream>
 #include <filesystem>
 #include <thread>
 #include <vector>
@@ -270,6 +272,207 @@ std::wstring ModUpdater::Label() {
 		return L"Update failed - click to retry";
 	case RESTART:
 		return L"Restarting...";
+	default:
+		return L"";
+	}
+}
+
+// ---------------------------------------------------------------- the rarity pack
+namespace {
+constexpr const char* PACK_RELEASE_URL = "https://api.github.com/repos/sushifishblock/EDOproextend/releases/tags/rarity-pack";
+constexpr const char* PACK_ASSET = "rarity_pack.json";
+constexpr size_t PACK_MAX_SIZE = 4 * 1024 * 1024;
+
+bool HttpGet(const std::string& url, std::string& body) {
+	auto* curl = curl_easy_init();
+	if(!curl)
+		return false;
+	body.clear();
+	SetCommon(curl, url);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteBody);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+	curl_easy_setopt(curl, CURLOPT_MAXFILESIZE, static_cast<long>(PACK_MAX_SIZE));
+	const auto result = curl_easy_perform(curl);
+	long status = 0;
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+	curl_easy_cleanup(curl);
+	return result == CURLE_OK && status == 200 && body.size() <= PACK_MAX_SIZE;
+}
+
+std::string ReadMarker() {
+	std::ifstream file("rarity_pack.id");
+	std::string id;
+	file >> id;
+	return id;
+}
+
+//a rarity file only holds words, numbers and spaces
+bool SafeText(const std::string& text, size_t max_size) {
+	if(text.size() > max_size)
+		return false;
+	for(const char c : text) {
+		if(!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == ' ' || c == '\n' || c == '\r'))
+			return false;
+	}
+	return true;
+}
+
+//a deck name that cannot point anywhere else than the deck folder
+bool SafeDeckName(const std::string& name) {
+	if(name.empty() || name.size() > 120 || name == "." || name == "..")
+		return false;
+	for(const unsigned char c : name) {
+		if(c < 32 || c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+			return false;
+	}
+	return name.find("..") == std::string::npos;
+}
+
+void WriteWithBackup(const std::filesystem::path& path, const std::string& content) {
+	std::error_code ec;
+	if(std::filesystem::exists(path, ec)) {
+		std::filesystem::path backup = path;
+		backup += ".backup";
+		std::filesystem::copy_file(path, backup, std::filesystem::copy_options::overwrite_existing, ec);
+	}
+	std::filesystem::path temp = path;
+	temp += ".tmp";
+	{
+		std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+		if(!file.is_open())
+			throw std::runtime_error("write");
+		file << content;
+		if(!file.good())
+			throw std::runtime_error("write");
+	}
+	std::filesystem::rename(temp, path, ec);
+	if(ec)
+		throw std::runtime_error("rename");
+}
+
+long long NowSeconds() {
+	return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+}
+
+void RarityPack::StartCheck() {
+	if(check_started.exchange(true))
+		return;
+	std::thread(&RarityPack::CheckThread).detach();
+}
+
+void RarityPack::CheckThread() {
+	try {
+		state = CHECKING;
+		std::string body;
+		if(!HttpGet(PACK_RELEASE_URL, body)) {
+			state = IDLE;
+			return;
+		}
+		const auto root = nlohmann::json::parse(body);
+		for(const auto& asset : root.at("assets")) {
+			if(asset.at("name").get<std::string>() != PACK_ASSET)
+				continue;
+			const std::string url = asset.at("browser_download_url").get<std::string>();
+			const std::string id = asset.at("id").dump();
+			if(url.rfind("https://github.com/sushifishblock/EDOproextend/releases/", 0) != 0 || asset.at("size").get<long long>() > static_cast<long long>(PACK_MAX_SIZE))
+				break;
+			if(id == ReadMarker()) {
+				state = IDLE; //already installed (or published from this very game folder)
+				return;
+			}
+			std::lock_guard<std::mutex> lock(info_mutex);
+			asset_url = url;
+			asset_id = id;
+			state = AVAILABLE;
+			return;
+		}
+	} catch(...) {}
+	state = IDLE;
+}
+
+void RarityPack::BeginInstall() {
+	State expected = AVAILABLE;
+	if(!state.compare_exchange_strong(expected, DOWNLOADING)) {
+		expected = FAILED;
+		if(!state.compare_exchange_strong(expected, DOWNLOADING))
+			return;
+	}
+	std::thread(&RarityPack::InstallThread).detach();
+}
+
+void RarityPack::InstallThread() {
+	try {
+		std::string url, id;
+		{
+			std::lock_guard<std::mutex> lock(info_mutex);
+			url = asset_url;
+			id = asset_id;
+		}
+		std::string body;
+		if(url.empty() || !HttpGet(url, body))
+			throw std::runtime_error("download");
+		const auto pack = nlohmann::json::parse(body);
+		//check everything first, then write
+		std::string designs, assignments;
+		std::vector<std::pair<std::string, std::string>> decks;
+		if(pack.contains("custom_rarities") && pack["custom_rarities"].is_object()) {
+			const auto& custom = pack["custom_rarities"];
+			if(!custom.contains("rarities") || !custom["rarities"].is_array() || custom["rarities"].size() > 40)
+				throw std::runtime_error("designs");
+			designs = custom.dump(1);
+		}
+		if(pack.contains("rarities_txt") && pack["rarities_txt"].is_string()) {
+			assignments = pack["rarities_txt"].get<std::string>();
+			if(!SafeText(assignments, 3 * 1024 * 1024))
+				throw std::runtime_error("assignments");
+		}
+		if(pack.contains("decks") && pack["decks"].is_object()) {
+			for(const auto& item : pack["decks"].items()) {
+				if(!item.value().is_string() || !SafeDeckName(item.key()))
+					continue;
+				const std::string text = item.value().get<std::string>();
+				if(!SafeText(text, 200 * 1024))
+					continue;
+				decks.emplace_back(item.key(), text);
+			}
+		}
+		if(designs.empty() && assignments.empty() && decks.empty())
+			throw std::runtime_error("empty");
+		std::error_code ec;
+		if(!designs.empty())
+			WriteWithBackup("custom_rarities.json", designs);
+		if(!assignments.empty())
+			WriteWithBackup("rarities.txt", assignments);
+		if(!decks.empty()) {
+			std::filesystem::create_directories("deck", ec);
+			for(const auto& deck : decks)
+				WriteWithBackup(std::filesystem::path("deck") / std::filesystem::u8path(deck.first + ".rarity"), deck.second);
+		}
+		std::ofstream("rarity_pack.id", std::ios::trunc) << id;
+		done_at = NowSeconds();
+		installed = true;
+		state = DONE;
+	} catch(...) {
+		state = FAILED;
+	}
+}
+
+bool RarityPack::RecentlyDone() {
+	return state.load() == DONE && NowSeconds() - done_at.load() < 8;
+}
+
+std::wstring RarityPack::Label() {
+	switch(state.load()) {
+	case AVAILABLE:
+		return L"New rarities from the author - click to install";
+	case DOWNLOADING:
+		return L"Installing rarities...";
+	case DONE:
+		return L"Rarities installed";
+	case FAILED:
+		return L"Rarity install failed - click to retry";
 	default:
 		return L"";
 	}

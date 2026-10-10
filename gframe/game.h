@@ -240,6 +240,8 @@ struct main_menu_panel_elements {
 	irr::gui::IGUIStaticText* stArtSyncBlock = nullptr;
 	irr::gui::IGUIButton* btnArtSyncContinue = nullptr;
 	irr::gui::IGUIButton* btnModUpdate = nullptr;
+	irr::gui::IGUIButton* btnRarityPack = nullptr;
+	std::wstring rarityPackLabel;
 	irr::gui::IGUIButton* btnDeckStats = nullptr;
 	irr::gui::IGUIButton* btnDeckDiff = nullptr;
 	irr::gui::IGUIWindow* wDeckStats = nullptr;

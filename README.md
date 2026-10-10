@@ -15,6 +15,7 @@ The game itself is still EDOPro: card scripts, databases and the duel core belon
 
 - **Card rarities** - foil effects (SR, UR, Secret, Gold, Prismatic, Ghost) in the browser, the big preview, the deck editor and on your own cards in duels. Pick one per card; optionally per deck and per copy (press Z in the deck editor to lock a card). Holo border, mouse parallax and a summon shine.
 - **Rarity Studio** - `rarity_studio.py` (start it with `Rarity Studio.bat`) lets you edit the rarities and make 8 custom ones with sliders and a live animated preview. It writes `custom_rarities.json`, which the game reloads while running. A foil library has 12 ready-made foils.
+- **Rarity pack** - the author can publish his rarities from the Rarity Studio ("Publish to friends"); the game then shows a button on the main menu to install them.
 - **Deck tools** - a statistics window and a deck compare window in the deck editor.
 - **One-click updater** - an "Update available" button on the main menu downloads the newest `EDOPro-x64.exe` from the releases.
 
@@ -32,7 +33,7 @@ The AI models and card art are not in this repository. If the `ai` folder is mis
 
 ## Installing (also for friends)
 
-Download `EDOproextend-1.4.0-x64-full.zip` from the [Releases](../../releases) page, extract the whole zip (do not run it from inside the zip viewer) and start `EDOPro.exe`. It is the normal EDOPro 41.0.2 game files with my 64-bit exe and a 64-bit `ocgcore.dll` already in place, so nothing else has to be installed. The first start needs internet (card data and pictures are downloaded by the game).
+Download `EDOproextend-1.5.0-x64-full.zip` from the [Releases](../../releases) page, extract the whole zip (do not run it from inside the zip viewer) and start `EDOPro.exe`. It is the normal EDOPro 41.0.2 game files with my 64-bit exe and a 64-bit `ocgcore.dll` already in place, so nothing else has to be installed. The first start needs internet (card data and pictures are downloaded by the game).
 
 To update only the mod later, use the "Update available" button on the main menu (v1.3 and newer), or replace `EDOPro.exe` with the one from `release/` in this repository.
 

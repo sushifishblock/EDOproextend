@@ -898,6 +898,20 @@ uint32_t RarityFx::DefsGeneration() {
 	return defs_generation;
 }
 
+void RarityFx::ReloadFiles() {
+	chosen.clear();
+	std::ifstream file("rarities.txt");
+	uint32_t code;
+	int value;
+	while(file >> code >> value) {
+		if(value > 0 && value < static_cast<int>(Rarity::COUNT))
+			chosen[code] = static_cast<Rarity>(value);
+	}
+	edit_loaded = false; //the deck table is read again
+	duel_pool.clear();
+	++generation;
+}
+
 void RarityFx::CheckReload(uint32_t now_ms) {
 	static uint32_t last_check = 0;
 	static bool first = true;

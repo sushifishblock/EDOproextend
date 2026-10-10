@@ -16,8 +16,10 @@ The result is one file, custom_rarities.json, in the game folder. "Export..." sa
 import copy
 import json
 import os
+import shutil
 import sys
 import time
+import zipfile
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
@@ -320,6 +322,9 @@ class Studio(tk.Tk):
         ttk.Button(bar, text="Apply to game now", style="Accent.TButton", command=self.save_now).pack(side="left", padx=10)
         self.status = ttk.Label(bar, text="", style="Hint.TLabel")
         self.status.pack(side="left", padx=6)
+        ttk.Button(bar, text="Publish to friends", style="Accent.TButton", command=self.publish_to_friends).pack(side="right", padx=(0, 18))
+        ttk.Button(bar, text="Share pack...", command=self.share_pack).pack(side="right", padx=(0, 6))
+        ttk.Button(bar, text="Get pack...", command=self.get_pack).pack(side="right", padx=(0, 6))
         ttk.Button(bar, text="Foil library...", command=self.open_library).pack(side="right", padx=(0, 18))
         ttk.Button(bar, text="Import...", command=self.import_file).pack(side="right")
         ttk.Button(bar, text="Export...", command=self.export_file).pack(side="right", padx=6)
@@ -514,6 +519,144 @@ class Studio(tk.Tk):
         frame = rarity_preview.compose(self.base_array, layers, seconds)
         self.photo = ImageTk.PhotoImage(rarity_preview.to_image(frame))
         self.canvas.itemconfig(self.canvas_image, image=self.photo)
+
+    # ------------------------------------------------------ publish to friends
+    def github_token(self):
+        """The GitHub login the git credential manager of this PC already has (nothing is stored by the Studio)."""
+        import subprocess
+        try:
+            out = subprocess.run(["git", "credential", "fill"], input="protocol=https\nhost=github.com\n\n", capture_output=True, text=True, timeout=30).stdout
+            for line in out.splitlines():
+                if line.startswith("password="):
+                    return line[len("password="):]
+        except Exception:
+            pass
+        from tkinter import simpledialog
+        return simpledialog.askstring("GitHub", "Paste a GitHub token that may publish releases of the mod repository\n(it is only used now, not saved):", show="*", parent=self)
+
+    def publish_to_friends(self):
+        """Uploads your rarities as one file to the mod's GitHub release 'rarity-pack'. Everyone with the game gets a button to install it."""
+        import urllib.request
+        import urllib.error
+        folder = self.game_folder.get()
+        if not messagebox.askyesno("Rarity Studio", "Publish your rarities?\n\nEveryone who uses the mod gets a button on the main menu to install your rarity designs, the rarity of your cards and your deck rarities (their own files are kept as .backup)."):
+            return
+        self.save_now()
+        pack = {"version": 1, "decks": {}}
+        try:
+            with open(self.path("custom_rarities.json"), "r", encoding="utf-8") as f:
+                pack["custom_rarities"] = json.load(f)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            messagebox.showerror("Rarity Studio", "custom_rarities.json could not be read:\n%s" % e)
+            return
+        if os.path.exists(self.path("rarities.txt")):
+            with open(self.path("rarities.txt"), "r", encoding="utf-8") as f:
+                pack["rarities_txt"] = f.read()
+        deck_folder = self.path("deck")
+        if os.path.isdir(deck_folder):
+            for entry in os.listdir(deck_folder):
+                if entry.endswith(".rarity"):
+                    with open(os.path.join(deck_folder, entry), "r", encoding="utf-8") as f:
+                        pack["decks"][entry[:-len(".rarity")]] = f.read()
+        data = json.dumps(pack).encode("utf-8")
+        if len(data) > 3 * 1024 * 1024:
+            messagebox.showerror("Rarity Studio", "The pack is too big (%d KB)." % (len(data) // 1024))
+            return
+        token = self.github_token()
+        if not token:
+            self.set_status("Publishing cancelled: no GitHub login found.")
+            return
+        repo = "sushifishblock/EDOproextend"
+        headers = {"Authorization": "token " + token, "User-Agent": "rarity-studio", "Accept": "application/vnd.github+json"}
+
+        def call(method, url, body=None, content_type="application/json"):
+            request = urllib.request.Request(url, data=body, method=method, headers=dict(headers, **({"Content-Type": content_type} if body is not None else {})))
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    text = response.read().decode("utf-8")
+                    return response.status, (json.loads(text) if text else {})
+            except urllib.error.HTTPError as e:
+                return e.code, {}
+
+        try:
+            self.set_status("Publishing...")
+            self.update_idletasks()
+            status, release = call("GET", "https://api.github.com/repos/%s/releases/tags/rarity-pack" % repo)
+            if status == 404:
+                body = json.dumps({"tag_name": "rarity-pack", "target_commitish": "main", "name": "Rarity pack",
+                                   "body": "The author's rarities. The game offers them with a button on the main menu. Not a game version.", "prerelease": True}).encode()
+                status, release = call("POST", "https://api.github.com/repos/%s/releases" % repo, body)
+            if status not in (200, 201) or "id" not in release:
+                raise RuntimeError("could not reach the release (HTTP %s); is the GitHub login right?" % status)
+            for asset in release.get("assets", []):
+                if asset.get("name") == "rarity_pack.json":
+                    call("DELETE", "https://api.github.com/repos/%s/releases/assets/%s" % (repo, asset["id"]))
+            status, asset = call("POST", "https://uploads.github.com/repos/%s/releases/%s/assets?name=rarity_pack.json" % (repo, release["id"]), data)
+            if status not in (200, 201) or "id" not in asset:
+                raise RuntimeError("the upload failed (HTTP %s)" % status)
+            # this game folder already has these rarities: no button for you
+            with open(self.path("rarity_pack.id"), "w", encoding="utf-8") as f:
+                f.write(str(asset["id"]))
+            self.set_status("Published at %s. Your friends see the button the next time they open the game." % time.strftime("%H:%M:%S"))
+            messagebox.showinfo("Rarity Studio", "Published.\n\nYour friends will see \"New rarities from the author - click to install\" on the main menu of their game (version 1.5 or newer).")
+        except Exception as e:
+            self.set_status("Publishing failed: %s" % e)
+            messagebox.showerror("Rarity Studio", "Publishing failed:\n%s" % e)
+
+    # ---------------------------------------------------------- share packs
+    def share_pack(self):
+        """One zip with everything a friend needs to see your rarities: the rarity designs, which card has which rarity and the deck rarities."""
+        folder = self.game_folder.get()
+        self.save_now()
+        filename = filedialog.asksaveasfilename(title="Save your rarity pack", defaultextension=".zip", initialfile="my_rarity_pack.zip", filetypes=[("Rarity pack", "*.zip")])
+        if not filename:
+            return
+        try:
+            count = 0
+            with zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED) as z:
+                for name in ("custom_rarities.json", "rarities.txt"):
+                    full = os.path.join(folder, name)
+                    if os.path.exists(full):
+                        z.write(full, name)
+                        count += 1
+                deck_folder = os.path.join(folder, "deck")
+                if os.path.isdir(deck_folder):
+                    for entry in os.listdir(deck_folder):
+                        if entry.endswith(".rarity"):
+                            z.write(os.path.join(deck_folder, entry), "deck/" + entry)
+                            count += 1
+            self.set_status("Saved the pack (%d files). Send it to your friend: they press \"Get pack...\"." % count)
+        except Exception as e:
+            messagebox.showerror("Rarity Studio", str(e))
+
+    def get_pack(self):
+        """Install a pack from a friend: it replaces your rarity designs and card rarities (your old files are kept as .backup)."""
+        filename = filedialog.askopenfilename(title="Open a rarity pack", filetypes=[("Rarity pack", "*.zip")])
+        if not filename:
+            return
+        if not messagebox.askyesno("Rarity Studio", "This replaces your rarity designs, the rarity of your cards and the deck rarities with the ones in the pack.\nYour current files are kept as .backup files. Continue?"):
+            return
+        folder = self.game_folder.get()
+        try:
+            with zipfile.ZipFile(filename) as z:
+                for member in z.namelist():
+                    name = member.replace("\\", "/")
+                    allowed = name in ("custom_rarities.json", "rarities.txt") or (name.startswith("deck/") and name.endswith(".rarity") and "/" not in name[5:] and ".." not in name)
+                    if not allowed:
+                        continue
+                    target = os.path.join(folder, *name.split("/"))
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    if os.path.exists(target):
+                        shutil.copyfile(target, target + ".backup")
+                    with z.open(member) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+            self.load_files()
+            self.select_rarity(self.current_id or "SR")
+            self.set_status("Pack installed. Restart the game so the card rarities are read again (the designs update by themselves).")
+        except Exception as e:
+            messagebox.showerror("Rarity Studio", str(e))
 
     # -------------------------------------------------------------- library
     def open_library(self):
