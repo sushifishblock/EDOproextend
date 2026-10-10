@@ -1537,8 +1537,7 @@ void Game::PopulateTabSettingsWindow() {
 		stBrowserRarity = env->addStaticText(L"Rarity", Scale(15, 255, 60, 275), false, false, tabInfo);
 		stBrowserRarity->setOverrideColor(0xffffd54a);
 		cbBrowserRarity = AddComboBox(env, Scale(62, 255, 205, 275), tabInfo, COMBOBOX_BROWSER_RARITY);
-		for(int i = 0; i < static_cast<int>(Rarity::COUNT); ++i)
-			cbBrowserRarity->addItem(RarityFx::Name(static_cast<Rarity>(i)), i);
+		RefillRarityCombo();
 		for(int i = 0; i < 4; i++)
 			btnBrowserSet[i] = env->addButton(Scale(200 + i * 23, 306, 220 + i * 23, 330), tabInfo, BUTTON_BROWSER_SET_0 + i, epro::to_wstring(i).data());
 		//only shown in the card browser
@@ -4260,6 +4259,30 @@ void Game::RefreshDeckDiff() {
 		lstDeckDiff->addItem(lines[i].text.data());
 		lstDeckDiff->setItemOverrideColor(static_cast<irr::u32>(i), irr::video::SColor(lines[i].color));
 	}
+}
+
+void Game::RefillRarityCombo() {
+	//the rarities that can be picked: the built-in ones and the custom ones of the Rarity Studio
+	const int selected = cbBrowserRarity->getSelected();
+	const int keep = selected >= 0 ? static_cast<int>(cbBrowserRarity->getItemData(selected)) : 0;
+	cbBrowserRarity->clear();
+	for(int i = 0; i < static_cast<int>(Rarity::COUNT); ++i) {
+		if(RarityFx::Defined(static_cast<Rarity>(i)))
+			cbBrowserRarity->addItem(RarityFx::Name(static_cast<Rarity>(i)), i);
+	}
+	SelectRarityItem(static_cast<Rarity>(keep));
+	rarityDefsGen = RarityFx::DefsGeneration();
+	rarityUiSig = 0;
+}
+
+void Game::SelectRarityItem(Rarity rarity) {
+	for(irr::u32 i = 0; i < cbBrowserRarity->getItemCount(); ++i) {
+		if(cbBrowserRarity->getItemData(i) == static_cast<irr::u32>(rarity)) {
+			cbBrowserRarity->setSelected(static_cast<int>(i));
+			return;
+		}
+	}
+	cbBrowserRarity->setSelected(0);
 }
 
 }

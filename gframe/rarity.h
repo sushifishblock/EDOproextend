@@ -2,6 +2,7 @@
 #define RARITY_H
 
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <map>
 #include <string>
@@ -16,6 +17,7 @@ namespace ygo {
 enum class Rarity : uint8_t {
 	NORMAL,
 	SR, UR, SCR, GR, PR, GST,
+	C1, C2, C3, C4, C5, C6, C7, C8, //custom rarities made with the Rarity Studio (custom_rarities.json)
 	COUNT
 };
 
@@ -25,6 +27,12 @@ public:
 	static Rarity Get(uint32_t code);
 	static void Set(uint32_t code, Rarity rarity);
 	static const wchar_t* Name(Rarity rarity);
+	//a rarity that can be picked: the built-in ones and the custom ones that are defined in custom_rarities.json
+	static bool Defined(Rarity rarity);
+	//changes when custom_rarities.json was (re)loaded
+	static uint32_t DefsGeneration();
+	//call every frame: reloads custom_rarities.json when it changed (checked once a second)
+	static void CheckReload(uint32_t now_ms);
 	//2D: the effect over a card picture drawn in `card` (browser grid, card preview)
 	static void Draw2D(irr::video::IVideoDriver* driver, const irr::core::recti& card, Rarity rarity, uint32_t time_ms, const irr::core::recti* clip, bool rotated = false);
 	//3D: the effect over the front of a card in a duel; `world` is the card's transform (already set), alpha 0-255

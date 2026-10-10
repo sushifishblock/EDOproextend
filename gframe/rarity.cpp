@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <nlohmann/json.hpp>
 #include <unordered_map>
 
 namespace ygo {
@@ -105,8 +106,10 @@ struct StripList {
 StripList RegionStrips(Region region) {
 	StripList list;
 	if(region == Region::BORDER) {
-		constexpr float t = 0.032f, sd = 0.045f;
-		list.items = { { { 0, 1, 0, t }, { 0, 1, 1 - t, 1 }, { 0, sd, t, 1 - t }, { 1 - sd, 1, t, 1 - t } } };
+		//the outermost gray rim of the card picture, up to the black outline (measured on real card pictures:
+		//the outline starts 2.3% from the left, 2.8% from the right, 1.6% from the top and 1.8% from the bottom edge)
+		constexpr float left = 0.023f, right = 0.028f, top = 0.016f, bottom = 0.018f;
+		list.items = { { { 0, 1, 0, top }, { 0, 1, 1 - bottom, 1 }, { 0, left, top, 1 - bottom }, { 1 - right, 1, top, 1 - bottom } } };
 		list.count = 4;
 		return list;
 	}
@@ -485,16 +488,77 @@ static std::vector<Layer> BuildLayers(Rarity rarity) {
 	}
 	return layers;
 }
-//the layers of a rarity are built once
+//rarities defined in custom_rarities.json: a custom slot (C1-C8), or a replacement for the layers of a built-in one
+struct CustomDef {
+	bool defined = false;
+	std::wstring name;
+	std::vector<Layer> layers;
+};
+CustomDef custom_defs[static_cast<int>(Rarity::COUNT)];
+uint32_t defs_generation = 0;
+bool layer_cache_built[static_cast<int>(Rarity::COUNT)] = {};
+std::vector<Layer> layer_cache[static_cast<int>(Rarity::COUNT)];
+
+const char* const PATTERN_NAMES[] = { "FLAT", "SHEEN", "GLITTER", "LINES", "DOTS", "CLOUD", "BEAM", "RAYS", "HATCH", "VDASH", "GLOW", "HATCHBAND", "VDASHBAND", "VIGNETTE", "WEAVEBAND", "WEAVE" };
+const char* const REGION_NAMES[] = { "CARD", "ART", "NAME", "BORDER" };
+const char* const RARITY_IDS[] = { "NORMAL", "SR", "UR", "SCR", "GR", "PR", "GST", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8" };
+
+//the layers of a rarity: a custom definition if there is one, else built once
 const std::vector<Layer>& LayersFor(Rarity rarity) {
-	static std::vector<Layer> cache[static_cast<int>(Rarity::COUNT)];
-	static bool built[static_cast<int>(Rarity::COUNT)] = {};
 	const int index = static_cast<int>(rarity);
-	if(!built[index]) {
-		cache[index] = BuildLayers(rarity);
-		built[index] = true;
+	if(custom_defs[index].defined)
+		return custom_defs[index].layers;
+	if(rarity >= Rarity::C1) {
+		static const std::vector<Layer> none;
+		return none;
 	}
-	return cache[index];
+	if(!layer_cache_built[index]) {
+		layer_cache[index] = BuildLayers(rarity);
+		layer_cache_built[index] = true;
+	}
+	return layer_cache[index];
+}
+
+template<size_t N>
+int IndexOf(const char* const (&names)[N], const std::string& name) {
+	for(size_t i = 0; i < N; ++i)
+		if(name == names[i])
+			return static_cast<int>(i);
+	return -1;
+}
+
+nlohmann::json LayerToJson(const Layer& l) {
+	char color[16];
+	snprintf(color, sizeof(color), "%08X", l.color);
+	return { { "pattern", PATTERN_NAMES[static_cast<int>(l.pattern)] }, { "region", REGION_NAMES[static_cast<int>(l.region)] }, { "color", color },
+			 { "tile", l.tile }, { "vx", l.vx }, { "vy", l.vy }, { "hue_center", l.hue_center }, { "hue_amp", l.hue_amp }, { "hue_rate", l.hue_rate },
+			 { "rainbow", l.rainbow }, { "pulse_amp", l.pulse_amp }, { "pulse_rate", l.pulse_rate }, { "sat", l.sat } };
+}
+
+bool LayerFromJson(const nlohmann::json& j, Layer& l) {
+	if(!j.is_object() || (j.contains("enabled") && j["enabled"].is_boolean() && !j["enabled"].get<bool>()))
+		return false;
+	const int pattern = IndexOf(PATTERN_NAMES, j.value("pattern", std::string()));
+	const int region = IndexOf(REGION_NAMES, j.value("region", std::string("CARD")));
+	if(pattern < 0 || region < 0)
+		return false;
+	l.pattern = static_cast<Pattern>(pattern);
+	l.region = static_cast<Region>(region);
+	std::string color = j.value("color", std::string("FFFFFFFF"));
+	if(!color.empty() && color[0] == '#')
+		color.erase(0, 1);
+	l.color = static_cast<uint32_t>(std::stoul(color, nullptr, 16));
+	l.tile = std::clamp(j.value("tile", 1.0f), 0.05f, 8.0f);
+	l.vx = std::clamp(j.value("vx", 0.0f), -5.0f, 5.0f);
+	l.vy = std::clamp(j.value("vy", 0.0f), -5.0f, 5.0f);
+	l.hue_center = j.value("hue_center", -1.0f);
+	l.hue_amp = std::clamp(j.value("hue_amp", 0.0f), 0.0f, 1.0f);
+	l.hue_rate = std::clamp(j.value("hue_rate", 0.0f), -5.0f, 5.0f);
+	l.rainbow = j.value("rainbow", false);
+	l.pulse_amp = std::clamp(j.value("pulse_amp", 0.0f), 0.0f, 1.0f);
+	l.pulse_rate = std::clamp(j.value("pulse_rate", 0.0f), 0.0f, 10.0f);
+	l.sat = std::clamp(j.value("sat", 0.45f), 0.0f, 1.0f);
+	return true;
 }
 
 uint32_t LayerColor(const Layer& layer, double seconds) {
@@ -544,7 +608,59 @@ void WriteFileAtomic(const std::filesystem::path& path, const std::string& conte
 }
 }
 
+namespace {
+//the built-in rarities as a file, the starting point for the Rarity Studio
+void ExportBuiltin() {
+	try {
+		nlohmann::json list = nlohmann::json::array();
+		const char* names[] = { "", "Super Rare (SR)", "Ultra Rare (UR)", "Secret Rare (ScR)", "Gold Rare (GR)", "Prismatic Secret (PR)", "Ghost Rare (Gst)" };
+		for(int r = 1; r <= static_cast<int>(Rarity::GST); ++r) {
+			nlohmann::json layers = nlohmann::json::array();
+			const std::vector<Layer> base = BuildLayers(static_cast<Rarity>(r));
+			for(const auto& layer : base)
+				layers.push_back(LayerToJson(layer));
+			list.push_back({ { "id", RARITY_IDS[r] }, { "name", names[r] }, { "layers", layers } });
+		}
+		WriteFileAtomic("rarities_builtin.json", nlohmann::json{ { "version", 1 }, { "rarities", list } }.dump(1));
+	} catch(...) {}
+}
+
+bool LoadCustomFile() {
+	try {
+		std::ifstream file("custom_rarities.json", std::ios::binary);
+		if(!file.is_open())
+			return false;
+		const auto root = nlohmann::json::parse(file);
+		CustomDef fresh[static_cast<int>(Rarity::COUNT)];
+		for(const auto& entry : root.at("rarities")) {
+			const int index = IndexOf(RARITY_IDS, entry.value("id", std::string()));
+			if(index < 1)
+				continue;
+			auto& def = fresh[index];
+			def.defined = true;
+			const std::string name = entry.value("name", std::string());
+			def.name.assign(name.begin(), name.end());
+			if(entry.contains("layers") && entry["layers"].is_array()) {
+				for(const auto& j : entry["layers"]) {
+					Layer layer{};
+					try {
+						if(LayerFromJson(j, layer))
+							def.layers.push_back(layer);
+					} catch(...) {}
+				}
+			}
+		}
+		for(int i = 0; i < static_cast<int>(Rarity::COUNT); ++i)
+			custom_defs[i] = std::move(fresh[i]);
+		return true;
+	} catch(...) {
+		return false; //a half-written or broken file: keep what is loaded now
+	}
+}
+}
+
 void RarityFx::Load() {
+	ExportBuiltin();
 	chosen.clear();
 	std::ifstream file("rarities.txt");
 	uint32_t code;
@@ -766,8 +882,48 @@ Rarity RarityFx::TakeDuelRarity(uint32_t code) {
 }
 
 const wchar_t* RarityFx::Name(Rarity rarity) {
-	static const wchar_t* names[] = { L"Normal (R)", L"Super Rare (SR)", L"Ultra Rare (UR)", L"Secret Rare (ScR)", L"Gold Rare (GR)", L"Prismatic Secret (PR)", L"Ghost Rare (Gst)" };
-	return names[static_cast<int>(rarity)];
+	static const wchar_t* names[] = { L"Normal (R)", L"Super Rare (SR)", L"Ultra Rare (UR)", L"Secret Rare (ScR)", L"Gold Rare (GR)", L"Prismatic Secret (PR)", L"Ghost Rare (Gst)",
+									  L"Custom 1", L"Custom 2", L"Custom 3", L"Custom 4", L"Custom 5", L"Custom 6", L"Custom 7", L"Custom 8" };
+	const int index = std::clamp(static_cast<int>(rarity), 0, static_cast<int>(Rarity::COUNT) - 1);
+	if(!custom_defs[index].name.empty())
+		return custom_defs[index].name.c_str();
+	return names[index];
+}
+
+bool RarityFx::Defined(Rarity rarity) {
+	return rarity < Rarity::C1 || custom_defs[static_cast<int>(rarity)].defined;
+}
+
+uint32_t RarityFx::DefsGeneration() {
+	return defs_generation;
+}
+
+void RarityFx::CheckReload(uint32_t now_ms) {
+	static uint32_t last_check = 0;
+	static bool first = true;
+	static bool had_file = false;
+	static std::filesystem::file_time_type last_time;
+	if(!first && now_ms - last_check < 1000)
+		return;
+	first = false;
+	last_check = now_ms;
+	std::error_code ec;
+	const auto time = std::filesystem::last_write_time("custom_rarities.json", ec);
+	if(ec) {
+		if(had_file) {
+			had_file = false;
+			for(auto& def : custom_defs)
+				def = CustomDef();
+			++defs_generation;
+		}
+		return;
+	}
+	if(had_file && time == last_time)
+		return;
+	had_file = true;
+	last_time = time;
+	if(LoadCustomFile())
+		++defs_generation;
 }
 
 void RarityFx::ReleaseTextures() {
@@ -791,6 +947,76 @@ void RarityFx::Draw2D(video::IVideoDriver* driver, const core::recti& card, Rari
 	for(const auto& layer : LayersFor(rarity)) {
 		++layer_index;
 		const float depth = 0.15f + 0.12f * (layer_index % 4);
+		if(layer.region == Region::BORDER && layer.pattern != Pattern::FLAT && !rotated) {
+			//the frame as one band: the pattern runs clockwise along the top, the right side, the bottom and the left side
+			//and round the corners without a break (the four strips only share one phase along the way)
+			core::recti rects[4];
+			int count = 0;
+			for(const auto& strip : RegionStrips(Region::BORDER))
+				rects[count++] = core::recti(card.UpperLeftCorner.X + static_cast<int>(w * strip[0]), card.UpperLeftCorner.Y + static_cast<int>(h * strip[2]),
+											 card.UpperLeftCorner.X + static_cast<int>(w * strip[1]), card.UpperLeftCorner.Y + static_cast<int>(h * strip[3]));
+			//0 top, 1 bottom, 2 left, 3 right
+			const int corner = rects[0].getHeight();
+			const int length[4] = { rects[0].getWidth(), rects[1].getWidth(), rects[2].getHeight(), rects[3].getHeight() };
+			const int perimeter = length[0] + length[1] + length[2] + length[3] + 4 * corner;
+			int tile = std::max(8, static_cast<int>(w * layer.tile));
+			//a whole number of tiles round the card, so the end meets the start
+			const int rounds = std::max(1, static_cast<int>(std::lround(static_cast<double>(perimeter) / tile)));
+			tile = std::max(8, static_cast<int>(std::lround(static_cast<double>(perimeter) / rounds)));
+			auto* texture = GetScaledPattern(driver, layer.pattern, QuantizeSize(std::min(tile, 384)));
+			if(!texture)
+				continue;
+			const int made = QuantizeSize(std::min(tile, 384));
+			const video::SColor color(LayerColor(layer, seconds));
+			const video::SColor colors[4] = { color, color, color, color };
+			const long long shift = static_cast<long long>(seconds * layer.vx * tile);
+			//where each side starts along the way round, clockwise from the top left
+			const long long start[4] = { 0, length[0] + corner + length[3] + corner, length[0] + corner + length[3] + corner + length[1] + corner, length[0] + corner };
+			for(int k = 0; k < 4; ++k) {
+				const bool reversed = k == 1 || k == 2; //the bottom and the left side run against the screen axes
+				const bool vertical = k >= 2;
+				long long offset = reversed ? shift - start[k] - length[k] : start[k] - shift;
+				offset = ((offset % tile) + tile) % tile;
+				const int off_x = vertical ? 0 : static_cast<int>(offset);
+				const int off_y = vertical ? static_cast<int>(offset) : 0;
+				const core::recti& area = rects[k];
+				if(layer.pattern == Pattern::BEAM || layer.pattern == Pattern::SHEEN || layer.pattern == Pattern::RAYS) {
+					//a band pattern: one line of the tile is stretched across the rim, so the band is square to the way round
+					if(!vertical) {
+						for(int x = area.UpperLeftCorner.X - off_x; x < area.LowerRightCorner.X; x += tile) {
+							core::recti dest(x, area.UpperLeftCorner.Y, x + tile, area.LowerRightCorner.Y);
+							dest.clipAgainst(area);
+							if(dest.getWidth() <= 0)
+								continue;
+							const core::recti source((dest.UpperLeftCorner.X - x) * made / tile, 0, std::max((dest.LowerRightCorner.X - x) * made / tile, (dest.UpperLeftCorner.X - x) * made / tile + 1), 1);
+							driver->draw2DImage(texture, dest, source, clip, colors, true);
+						}
+					} else {
+						for(int y = area.UpperLeftCorner.Y - off_y; y < area.LowerRightCorner.Y; y += tile) {
+							core::recti dest(area.UpperLeftCorner.X, y, area.LowerRightCorner.X, y + tile);
+							dest.clipAgainst(area);
+							if(dest.getHeight() <= 0)
+								continue;
+							const core::recti source(0, (dest.UpperLeftCorner.Y - y) * made / tile, 1, std::max((dest.LowerRightCorner.Y - y) * made / tile, (dest.UpperLeftCorner.Y - y) * made / tile + 1));
+							driver->draw2DImage(texture, dest, source, clip, colors, true);
+						}
+					}
+					continue;
+				}
+				for(int x = area.UpperLeftCorner.X - off_x; x < area.LowerRightCorner.X; x += tile) {
+					for(int y = area.UpperLeftCorner.Y - off_y; y < area.LowerRightCorner.Y; y += tile) {
+						core::recti dest(x, y, x + tile, y + tile);
+						dest.clipAgainst(area);
+						if(dest.getWidth() <= 0 || dest.getHeight() <= 0)
+							continue;
+						const core::recti source((dest.UpperLeftCorner.X - x) * made / tile, (dest.UpperLeftCorner.Y - y) * made / tile,
+												 (dest.LowerRightCorner.X - x) * made / tile, (dest.LowerRightCorner.Y - y) * made / tile);
+						driver->draw2DImage(texture, dest, source, clip, colors, true);
+					}
+				}
+			}
+			continue;
+		}
 		for(const auto& strip : RegionStrips(layer.region)) {
 		const float fx0 = strip[0], fx1 = strip[1], fy0 = strip[2], fy1 = strip[3];
 		//a card lying on its side (defense position): the card's top is on the left, its width runs up and down
@@ -907,6 +1133,45 @@ void RarityFx::Draw3D(video::IVideoDriver* driver, const video::SMaterial& base,
 		//the card front is 0.7 x 1.0, the picture a part of it (texture top is at y = -0.5)
 		video::SMaterial material = base;
 		material.setTexture(0, texture);
+		if(layer.region == Region::BORDER && layer.pattern != Pattern::FLAT) {
+			//the frame as one band running clockwise round the card: texture coordinates follow the way round, so the pattern
+			//goes through the corners without a break (a whole number of tiles fit round the card)
+			float rx0[4], rx1[4], ry0[4], ry1[4];
+			int count = 0;
+			for(const auto& strip : RegionStrips(Region::BORDER)) {
+				rx0[count] = -0.35f + strip[0] * 0.7f;
+				rx1[count] = -0.35f + strip[1] * 0.7f;
+				ry0[count] = -0.5f + strip[2];
+				ry1[count] = -0.5f + strip[3];
+				++count;
+			}
+			//0 top, 1 bottom, 2 left, 3 right
+			const float corner = ry1[0] - ry0[0];
+			const float length[4] = { rx1[0] - rx0[0], rx1[1] - rx0[1], ry1[2] - ry0[2], ry1[3] - ry0[3] };
+			const float perimeter = length[0] + length[1] + length[2] + length[3] + 4 * corner;
+			const float wanted = 0.7f * layer.tile;
+			const float tile = perimeter / std::max(1.0f, std::round(perimeter / wanted));
+			const float start[4] = { 0, length[0] + corner + length[3] + corner, length[0] + corner + length[3] + corner + length[1] + corner, length[0] + corner };
+			const float shift = static_cast<float>(Wrap01(static_cast<float>(seconds * layer.vx)));
+			const video::SColor color(ScaleAlpha(LayerColor(layer, seconds), alpha));
+			const float z = 0.004f;
+			for(int k = 0; k < 4; ++k) {
+				const float a = start[k] / tile - shift, b = (start[k] + length[k]) / tile - shift;
+				//the value along the strip at its two ends (screen left to right, or top to bottom)
+				const bool reversed = k == 1 || k == 2;
+				const float first = reversed ? b : a, second = reversed ? a : b;
+				const bool vertical = k >= 2;
+				video::S3DVertex v[4] = {
+					video::S3DVertex(rx0[k], ry0[k], z, 0, 0, 1, color, vertical ? 0.0f : first, vertical ? first : 0.0f),
+					video::S3DVertex(rx1[k], ry0[k], z, 0, 0, 1, color, vertical ? 0.0f : second, vertical ? first : 0.0f),
+					video::S3DVertex(rx0[k], ry1[k], z, 0, 0, 1, color, vertical ? 0.0f : first, vertical ? second : 0.0f),
+					video::S3DVertex(rx1[k], ry1[k], z, 0, 0, 1, color, vertical ? 0.0f : second, vertical ? second : 0.0f),
+				};
+				driver->setMaterial(material);
+				driver->drawVertexPrimitiveList(v, 4, indices, 2);
+			}
+			continue;
+		}
 		for(const auto& strip : RegionStrips(layer.region)) {
 		const float fx0 = strip[0], fx1 = strip[1], fy0 = strip[2], fy1 = strip[3];
 		const float x0 = -0.35f + fx0 * 0.7f, x1 = -0.35f + fx1 * 0.7f;

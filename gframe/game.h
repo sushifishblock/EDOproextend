@@ -64,6 +64,7 @@ namespace irr {
 	}
 }
 namespace ygo {
+enum class Rarity : uint8_t;
 
 class GitRepo;
 
@@ -216,6 +217,7 @@ struct main_menu_panel_elements {
 	uint32_t browserRarityTarget = 0;
 	int rarityUiMode = 0;
 	uint32_t rarityLockGen = 0;
+	uint32_t rarityDefsGen = 0;
 	uint32_t rarityLockCode = 0; //Z in the deck editor locks the rarity picker onto the hovered card (and copy)
 	int rarityLockOrdinal = -1;
 	bool rarityLockToggle = false;
@@ -589,6 +591,8 @@ public:
 	bool ApplySkin(const epro::path_string& skin, bool reload = false, bool firstrun = false);
 	void RefreshDeck(irr::gui::IGUIComboBox* cbDeck);
 	void DrawDeckTools();
+	void RefillRarityCombo();
+	void SelectRarityItem(Rarity rarity);
 	void RefreshDeckDiff();
 	void RefreshLFLists();
 	void RefreshAiDecks();

@@ -1639,6 +1639,9 @@ bool Game::UpdateArtSync() {
 }
 //the rarity effect over the big card picture of the info panel (drawn after the GUI, which draws the picture itself)
 void Game::DrawRarityPreview() {
+	RarityFx::CheckReload(device->getTimer()->getTime());
+	if(rarityDefsGen != RarityFx::DefsGeneration())
+		RefillRarityCombo();
 	//the cards of my own that are shown in the card selection / card display windows (searching the deck, the graveyard...)
 	if(dInfo.isInDuel) {
 		const auto settled = [&](irr::gui::IGUIElement* window) {
@@ -1757,7 +1760,7 @@ void Game::DrawRarityPreview() {
 			chkRarityCopy->setChecked(RarityFx::PerCopy());
 			chkRarityCopy->setEnabled(RarityFx::DeckMode() && mode == 2);
 			if(mode == 2)
-				cbBrowserRarity->setSelected(static_cast<int>(RarityFx::GetFor(rarityLockCode ? rarityLockCode : showingcard, rarityCopyOrdinal)));
+				SelectRarityItem(RarityFx::GetFor(rarityLockCode ? rarityLockCode : showingcard, rarityCopyOrdinal));
 		}
 	}
 	if(mode != rarityUiMode) {
@@ -1979,7 +1982,7 @@ void Game::UpdateBrowserControls() {
 		copies = deckBuilder.CountCopies(cd);
 		if(cd->code != browserRarityTarget) {
 			browserRarityTarget = cd->code;
-			cbBrowserRarity->setSelected(static_cast<int>(RarityFx::GetFor(cd->code, -1)));
+			SelectRarityItem(RarityFx::GetFor(cd->code, -1));
 		}
 		const bool extra = (cd->type & (TYPE_FUSION | TYPE_SYNCHRO | TYPE_XYZ)) || (cd->type & (TYPE_LINK | TYPE_SPELL)) == TYPE_LINK;
 		label = epro::format(L"In deck: {} of {} ({})", copies, deckBuilder.GetCardLimit(cd), deckBuilder.browser_add_to_side ? L"Side" : extra ? L"Extra" : L"Main");
