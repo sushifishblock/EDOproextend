@@ -8,6 +8,8 @@
 #include "deck_con.h"
 #include "genesys.h"
 #include "rarity.h"
+#include "deck_tags.h"
+#include "deck_versions.h"
 #include "popularity.h"
 #include "utils.h"
 #include "data_manager.h"
@@ -131,6 +133,12 @@ void DeckBuilder::Terminate(bool showmenu) {
 	mainGame->wHandTest->setVisible(false);
 	mainGame->wDeckStats->setVisible(false);
 	mainGame->wDeckDiff->setVisible(false);
+	mainGame->wDeckOdds->setVisible(false);
+	mainGame->wDeckVersions->setVisible(false);
+	mainGame->btnDeckOdds->setVisible(false);
+	mainGame->btnDeckVersions->setVisible(false);
+	mainGame->btnDeckUndo->setVisible(false);
+	mainGame->btnDeckRedo->setVisible(false);
 	mainGame->btnDeckStats->setVisible(false);
 	mainGame->btnDeckDiff->setVisible(false);
 	mainGame->device->setEventReceiver(&mainGame->menuHandler);
@@ -183,6 +191,8 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 			break;
 		if(mainGame->wLinkMarks->isVisible() && id != BUTTON_MARKERS_OK)
 			break;
+		if(mainGame->OnOddsEvent(event) || mainGame->OnVersionsEvent(event))
+			return true;
 		switch(event.GUIEvent.EventType) {
 		case irr::gui::EGET_BUTTON_CLICKED: {
 			switch(id) {
@@ -283,11 +293,15 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				break;
 			}
 			case BUTTON_DECK_STATS: {
+				mainGame->wDeckVersions->setVisible(false);
+				mainGame->wDeckOdds->setVisible(false);
 				mainGame->wDeckDiff->setVisible(false);
 				mainGame->PopupElement(mainGame->wDeckStats);
 				break;
 			}
 			case BUTTON_DECK_DIFF: {
+				mainGame->wDeckVersions->setVisible(false);
+				mainGame->wDeckOdds->setVisible(false);
 				mainGame->wDeckStats->setVisible(false);
 				mainGame->RefreshDeck(mainGame->cbDeckDiff);
 				mainGame->PopupElement(mainGame->wDeckDiff);
@@ -295,6 +309,8 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				break;
 			}
 			case BUTTON_DECK_TOOLS_CLOSE: {
+				mainGame->wDeckVersions->setVisible(false);
+				mainGame->wDeckOdds->setVisible(false);
 				mainGame->wDeckStats->setVisible(false);
 				mainGame->wDeckDiff->setVisible(false);
 				break;
@@ -347,8 +363,9 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 			}
 			case BUTTON_SAVE_DECK: {
 				int sel = mainGame->cbDBDecks->getSelected();
-				if(sel >= 0 && DeckManager::SaveDeck(Utils::ToPathString(mainGame->cbDBDecks->getItem(sel)), current_deck)) {
+				if(sel >= 0 && DeckVersions::Keep(mainGame->cbDBDecks->getItem(sel)) && DeckManager::SaveDeck(Utils::ToPathString(mainGame->cbDBDecks->getItem(sel)), current_deck)) {
 					RarityFx::SaveDeckAs(mainGame->cbDBDecks->getItem(sel));
+					DeckTags::SaveDeckAs(mainGame->cbDBDecks->getItem(sel));
 					mainGame->stACMessage->setText(gDataManager->GetSysString(1335).data());
 					mainGame->PopupElement(mainGame->wACMessage, 20);
 				}
@@ -378,6 +395,7 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				}
 				if(DeckManager::SaveDeck(Utils::ToPathString(dname), current_deck)) {
 					RarityFx::SaveDeckAs(std::wstring(dname));
+					DeckTags::SaveDeckAs(std::wstring(dname));
 					mainGame->stACMessage->setText(gDataManager->GetSysString(1335).data());
 					mainGame->PopupElement(mainGame->wACMessage, 20);
 				}
@@ -408,6 +426,8 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 				}
 				if(DeckManager::RenameDeck(Utils::ToPathString(mainGame->cbDBDecks->getItem(sel)), Utils::ToPathString(dname))) {
 					RarityFx::RenameDeck(mainGame->cbDBDecks->getItem(sel), dname);
+					DeckTags::RenameDeck(mainGame->cbDBDecks->getItem(sel), dname);
+					DeckVersions::RenameDeck(mainGame->cbDBDecks->getItem(sel), dname);
 					mainGame->cbDBDecks->removeItem(sel);
 					mainGame->cbDBDecks->setSelected(mainGame->cbDBDecks->addItem(dname));
 				} else {
@@ -497,6 +517,8 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					int sel = mainGame->cbDBDecks->getSelected();
 					if(DeckManager::DeleteDeck(current_deck, Utils::ToPathString(mainGame->cbDBDecks->getItem(sel)))) {
 						RarityFx::DeleteDeck(mainGame->cbDBDecks->getItem(sel));
+						DeckTags::DeleteDeck(mainGame->cbDBDecks->getItem(sel));
+						DeckVersions::DeleteDeck(mainGame->cbDBDecks->getItem(sel));
 						mainGame->cbDBDecks->removeItem(sel);
 						int count = mainGame->cbDBDecks->getItemCount();
 						if(sel >= count)
@@ -947,9 +969,22 @@ bool DeckBuilder::OnEvent(const irr::SEvent& event) {
 					ImportDeck();
 				break;
 			}
+			case irr::KEY_KEY_T: {
+				//T over a deck card: cycle its tag (Starter, Extender, Handtrap, Brick, none)
+				if(!browser_mode && !event.KeyInput.Control && hovered_code && hovered_pos >= 1 && hovered_pos <= 3)
+					DeckTags::Cycle(hovered_code);
+				break;
+			}
 			case irr::KEY_KEY_Z: {
-				if(!browser_mode && !event.KeyInput.Control)
+				if(event.KeyInput.Control)
+					mainGame->DeckUndo(event.KeyInput.Shift); //Ctrl+Z undo, Ctrl+Shift+Z redo
+				else if(!browser_mode)
 					mainGame->rarityLockToggle = true;
+				break;
+			}
+			case irr::KEY_KEY_Y: {
+				if(event.KeyInput.Control)
+					mainGame->DeckUndo(true);
 				break;
 			}
 			default:

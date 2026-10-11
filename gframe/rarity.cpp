@@ -1,4 +1,6 @@
 #include "rarity.h"
+#include "data_manager.h"
+#include "rarity_rules.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -84,7 +86,7 @@ static std::vector<Layer> BaseLayers(Rarity rarity) {
 //where the picture is on a card (fractions of the card)
 //how fast everything moves (1 = the speed of the first version)
 constexpr double SPEED = 1.8;
-constexpr float ART_X0 = 0.120f, ART_X1 = 0.880f, ART_Y0 = 0.180f, ART_Y1 = 0.705f;
+constexpr float ART_X0 = 0.112f, ART_X1 = 0.888f, ART_Y0 = 0.180f, ART_Y1 = 0.711f;
 //the name bar
 constexpr float NAME_X0 = 0.06f, NAME_X1 = 0.80f, NAME_Y0 = 0.030f, NAME_Y1 = 0.110f;
 
@@ -659,38 +661,160 @@ bool LoadCustomFile() {
 }
 }
 
-void RarityFx::Load() {
-	ExportBuiltin();
+namespace {
+//rarities.txt: "code value"; value 99 = this card is Normal on purpose (a rarity rule does not apply to it)
+constexpr int EXPLICIT_NORMAL = 99;
+}
+
+void RarityFx::ReadAssignments() {
 	chosen.clear();
 	std::ifstream file("rarities.txt");
 	uint32_t code;
 	int value;
 	while(file >> code >> value) {
-		if(value > 0 && value < static_cast<int>(Rarity::COUNT))
+		if(value == EXPLICIT_NORMAL)
+			chosen[code] = Rarity::NORMAL;
+		else if(value > 0 && value < static_cast<int>(Rarity::COUNT))
 			chosen[code] = static_cast<Rarity>(value);
 	}
+}
+
+void RarityFx::Load() {
+	ExportBuiltin();
+	ReadAssignments();
 }
 
 void RarityFx::Save() {
 	std::ostringstream out;
 	for(const auto& entry : chosen)
-		out << entry.first << " " << static_cast<int>(entry.second) << "\n";
+		out << entry.first << " " << (entry.second == Rarity::NORMAL ? EXPLICIT_NORMAL : static_cast<int>(entry.second)) << "\n";
 	WriteFileAtomic("rarities.txt", out.str());
 }
 
-Rarity RarityFx::Get(uint32_t code) {
-	if(chosen.empty())
+namespace {
+CardFacts FactsOf(const CardDataC& data) {
+	CardFacts facts;
+	facts.type = data.type;
+	facts.attribute = data.attribute;
+	facts.level = data.level & 0xff;
+	facts.race = data.race;
+	facts.setcodes = data.setcodes;
+	facts.setcodes.erase(std::remove(facts.setcodes.begin(), facts.setcodes.end(), uint16_t(0)), facts.setcodes.end());
+	const auto name = gDataManager->GetName(data.getRealCode());
+	facts.name.assign(name.data(), name.size());
+	return facts;
+}
+}
+
+//the rarity a rule gives a card (NORMAL when no rule matches); remembered per card until the rules change
+Rarity RarityFx::RuleRarity(uint32_t code) {
+	if(rules.empty())
 		return Rarity::NORMAL;
+	const auto cached = rule_cache.find(code);
+	if(cached != rule_cache.end())
+		return static_cast<Rarity>(cached->second);
+	Rarity result = Rarity::NORMAL;
+	if(gDataManager) {
+		if(const auto* data = gDataManager->GetCardData(code)) {
+			if(const auto* rule = RarityRules::Find(rules, FactsOf(*data))) {
+				for(int i = 1; i < static_cast<int>(Rarity::COUNT); ++i) {
+					if(rule->rarity == Id(static_cast<Rarity>(i))) {
+						result = static_cast<Rarity>(i);
+						break;
+					}
+				}
+			}
+		}
+	}
+	rule_cache[code] = static_cast<uint8_t>(result);
+	return result;
+}
+
+const char* RarityFx::Id(Rarity rarity) {
+	static const char* ids[] = { "", "SR", "UR", "SCR", "GR", "PR", "GST", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8" };
+	const int index = static_cast<int>(rarity);
+	return index >= 0 && index < static_cast<int>(Rarity::COUNT) ? ids[index] : "";
+}
+
+void RarityFx::SetRules(std::vector<RarityRule> fresh) {
+	rules = std::move(fresh);
+	rule_cache.clear();
+	++generation;
+	WriteFileAtomic("rarity_rules.json", RarityRules::ToJson(rules));
+}
+
+size_t RarityFx::CountCaught(const std::vector<RarityRule>& list, size_t index, std::vector<std::wstring>& sample, size_t max_sample) {
+	sample.clear();
+	if(!gDataManager || index >= list.size())
+		return 0;
+	size_t caught = 0;
+	for(const auto& entry : gDataManager->cards) {
+		const CardDataC& data = entry.second._data;
+		if((data.type & 0x4000) || data.IsInArtworkOffsetRange()) //(tokens and the other artworks of a card)
+			continue;
+		const CardFacts facts = FactsOf(data);
+		if(!list[index].Matches(facts))
+			continue;
+		bool taken = false;
+		for(size_t i = 0; i < index && !taken; ++i)
+			taken = list[i].Matches(facts);
+		if(taken)
+			continue;
+		++caught;
+		if(sample.size() < max_sample)
+			sample.push_back(facts.name);
+	}
+	return caught;
+}
+
+Rarity RarityFx::Get(uint32_t code) {
 	const auto it = chosen.find(code);
-	return it == chosen.end() ? Rarity::NORMAL : it->second;
+	if(it != chosen.end())
+		return it->second;
+	return RuleRarity(code);
 }
 
 void RarityFx::Set(uint32_t code, Rarity rarity) {
-	if(rarity == Rarity::NORMAL)
+	if(rarity == Rarity::NORMAL && RuleRarity(code) == Rarity::NORMAL)
 		chosen.erase(code);
 	else
-		chosen[code] = rarity;
+		chosen[code] = rarity; //(Normal here beats a rule)
 	Save();
+}
+
+void RarityFx::CheckRulesReload(uint32_t now_ms) {
+	static uint32_t last_check = 0;
+	static bool first = true;
+	static bool had_file = false;
+	static std::filesystem::file_time_type last_time;
+	if(!first && now_ms - last_check < 1000)
+		return;
+	first = false;
+	last_check = now_ms;
+	std::error_code ec;
+	const auto time = std::filesystem::last_write_time("rarity_rules.json", ec);
+	if(ec) {
+		if(had_file) {
+			had_file = false;
+			rules.clear();
+			rule_cache.clear();
+			++generation;
+		}
+		return;
+	}
+	if(had_file && time == last_time)
+		return;
+	had_file = true;
+	last_time = time;
+	std::ifstream file("rarity_rules.json", std::ios::binary);
+	std::ostringstream text;
+	text << file.rdbuf();
+	std::vector<RarityRule> fresh;
+	if(!RarityRules::Parse(text.str(), fresh))
+		return; //a half-written file: keep the rules that are loaded now
+	rules = std::move(fresh);
+	rule_cache.clear();
+	++generation;
 }
 
 namespace {
@@ -899,20 +1023,15 @@ uint32_t RarityFx::DefsGeneration() {
 }
 
 void RarityFx::ReloadFiles() {
-	chosen.clear();
-	std::ifstream file("rarities.txt");
-	uint32_t code;
-	int value;
-	while(file >> code >> value) {
-		if(value > 0 && value < static_cast<int>(Rarity::COUNT))
-			chosen[code] = static_cast<Rarity>(value);
-	}
+	ReadAssignments();
+	rule_cache.clear();
 	edit_loaded = false; //the deck table is read again
 	duel_pool.clear();
 	++generation;
 }
 
 void RarityFx::CheckReload(uint32_t now_ms) {
+	CheckRulesReload(now_ms);
 	static uint32_t last_check = 0;
 	static bool first = true;
 	static bool had_file = false;

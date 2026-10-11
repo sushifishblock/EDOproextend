@@ -320,9 +320,12 @@ class Studio(tk.Tk):
         ttk.Checkbutton(bar, text="Apply to the game automatically", variable=self.auto_apply,
                         command=self.on_auto_toggle).pack(side="left")
         ttk.Button(bar, text="Apply to game now", style="Accent.TButton", command=self.save_now).pack(side="left", padx=10)
+        ttk.Button(bar, text="Sleeves & playmat...", command=self.open_art).pack(side="left")
+        ttk.Button(bar, text="Rarity rules...", command=self.open_rules).pack(side="left", padx=6)
         self.status = ttk.Label(bar, text="", style="Hint.TLabel")
         self.status.pack(side="left", padx=6)
-        ttk.Button(bar, text="Publish to friends", style="Accent.TButton", command=self.publish_to_friends).pack(side="right", padx=(0, 18))
+        ttk.Button(bar, text="Publish game update", command=self.publish_game_update).pack(side="right", padx=(0, 18))
+        ttk.Button(bar, text="Publish to friends", style="Accent.TButton", command=self.publish_to_friends).pack(side="right", padx=(0, 6))
         ttk.Button(bar, text="Share pack...", command=self.share_pack).pack(side="right", padx=(0, 6))
         ttk.Button(bar, text="Get pack...", command=self.get_pack).pack(side="right", padx=(0, 6))
         ttk.Button(bar, text="Foil library...", command=self.open_library).pack(side="right", padx=(0, 18))
@@ -534,15 +537,38 @@ class Studio(tk.Tk):
         from tkinter import simpledialog
         return simpledialog.askstring("GitHub", "Paste a GitHub token that may publish releases of the mod repository\n(it is only used now, not saved):", show="*", parent=self)
 
+    def open_art(self):
+        try:
+            import studio_art
+        except Exception as e:
+            messagebox.showerror("Rarity Studio", "Sleeves and playmat need Pillow:\n\n    pip install pillow numpy\n\n(%s)" % e)
+            return
+        studio_art.open_art_window(self, Slider)
+
+    def open_rules(self):
+        import studio_rules
+        studio_rules.open_rules_window(self)
+
+    def pack_extras(self, pack):
+        """The rarity rules and the sleeve / playmat pictures go into every pack."""
+        folder = self.game_folder.get()
+        import studio_rules
+        pack["rarity_rules"] = studio_rules.collect_rules(folder)
+        try:
+            import studio_art
+            pack["art"] = studio_art.collect_art(folder)
+        except Exception:
+            pass
+
     def publish_to_friends(self):
         """Uploads your rarities as one file to the mod's GitHub release 'rarity-pack'. Everyone with the game gets a button to install it."""
         import urllib.request
         import urllib.error
         folder = self.game_folder.get()
-        if not messagebox.askyesno("Rarity Studio", "Publish your rarities?\n\nEveryone who uses the mod gets a button on the main menu to install your rarity designs, the rarity of your cards and your deck rarities (their own files are kept as .backup)."):
+        if not messagebox.askyesno("Rarity Studio", "Publish your rarities?\n\nEveryone who uses the mod gets a button on the main menu to install your rarity designs, rarity rules, sleeves, playmat, the rarity of your cards and your deck rarities (their own files are kept as .backup)."):
             return
         self.save_now()
-        pack = {"version": 1, "decks": {}}
+        pack = {"version": 1, "decks": {}, "tags": {}}
         try:
             with open(self.path("custom_rarities.json"), "r", encoding="utf-8") as f:
                 pack["custom_rarities"] = json.load(f)
@@ -560,8 +586,12 @@ class Studio(tk.Tk):
                 if entry.endswith(".rarity"):
                     with open(os.path.join(deck_folder, entry), "r", encoding="utf-8") as f:
                         pack["decks"][entry[:-len(".rarity")]] = f.read()
+                elif entry.endswith(".tags"):
+                    with open(os.path.join(deck_folder, entry), "r", encoding="utf-8") as f:
+                        pack["tags"][entry[:-len(".tags")]] = f.read()
+        self.pack_extras(pack)
         data = json.dumps(pack).encode("utf-8")
-        if len(data) > 3 * 1024 * 1024:
+        if len(data) > 11 * 1024 * 1024:
             messagebox.showerror("Rarity Studio", "The pack is too big (%d KB)." % (len(data) // 1024))
             return
         token = self.github_token()
@@ -605,6 +635,67 @@ class Studio(tk.Tk):
             self.set_status("Publishing failed: %s" % e)
             messagebox.showerror("Rarity Studio", "Publishing failed:\n%s" % e)
 
+    def gh_call(self, token, method, url, body=None, content_type="application/json", timeout=300):
+        import urllib.request
+        import urllib.error
+        headers = {"Authorization": "token " + token, "User-Agent": "rarity-studio", "Accept": "application/vnd.github+json"}
+        if body is not None:
+            headers["Content-Type"] = content_type
+        request = urllib.request.Request(url, data=body, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                text = response.read().decode("utf-8")
+                return response.status, (json.loads(text) if text else {})
+        except urllib.error.HTTPError as e:
+            return e.code, {}
+
+    def publish_game_update(self):
+        """Uploads the game exe of this game folder, so friends get the "Update available" button for it.
+        No new version has to be pushed to GitHub: the exe goes to the same 'rarity-pack' release the rarities use."""
+        import re
+        exe_path = self.path("EDOPro.exe")
+        if not os.path.exists(exe_path):
+            messagebox.showerror("Rarity Studio", "EDOPro.exe was not found in the game folder.")
+            return
+        with open(exe_path, "rb") as f:
+            exe = f.read()
+        match = re.search(rb"EDOPROX_MODVERSION=([0-9][0-9.]*)", exe)
+        if not match:
+            messagebox.showerror("Rarity Studio", "This EDOPro.exe is too old: it does not say which version it is (needs 1.5.1 or newer).")
+            return
+        version = match.group(1).decode()
+        if not messagebox.askyesno("Rarity Studio", "Publish this game build (version %s, %d MB) to your friends?\n\nThey get \"Update available\" on the main menu and the update replaces their EDOPro.exe.\nNothing is pushed to the code repository." % (version, len(exe) // 1048576)):
+            return
+        token = self.github_token()
+        if not token:
+            self.set_status("Publishing cancelled: no GitHub login found.")
+            return
+        repo = "sushifishblock/EDOproextend"
+        try:
+            self.set_status("Publishing the game build (uploading %d MB)..." % (len(exe) // 1048576))
+            self.update_idletasks()
+            status, release = self.gh_call(token, "GET", "https://api.github.com/repos/%s/releases/tags/rarity-pack" % repo)
+            if status == 404:
+                body = json.dumps({"tag_name": "rarity-pack", "target_commitish": "main", "name": "Rarity pack",
+                                   "body": "The author's rarities and builds, offered by the game with a button. Not a game version.", "prerelease": True}).encode()
+                status, release = self.gh_call(token, "POST", "https://api.github.com/repos/%s/releases" % repo, body)
+            if status not in (200, 201) or "id" not in release:
+                raise RuntimeError("could not reach the release (HTTP %s)" % status)
+            # the exe gets its version in the name: a new address for every version, so nothing old is ever served for it
+            file_name = "EDOPro-x64-%s.exe" % version
+            for asset in release.get("assets", []):
+                if asset.get("name", "").startswith("EDOPro-x64") or asset.get("name") == "build.json":
+                    self.gh_call(token, "DELETE", "https://api.github.com/repos/%s/releases/assets/%s" % (repo, asset["id"]))
+            base = "https://uploads.github.com/repos/%s/releases/%s/assets?name=" % (repo, release["id"])
+            status, asset = self.gh_call(token, "POST", base + file_name + "&label=" + version, exe, "application/octet-stream", 1200)
+            if status not in (200, 201):
+                raise RuntimeError("the upload of the game failed (HTTP %s)" % status)
+            self.set_status("Published game build %s at %s." % (version, time.strftime("%H:%M:%S")))
+            messagebox.showinfo("Rarity Studio", "Published game build %s.\n\nYour friends see \"Update available\" the next time they open the game (they need version 1.5.0 or newer for the button)." % version)
+        except Exception as e:
+            self.set_status("Publishing failed: %s" % e)
+            messagebox.showerror("Rarity Studio", "Publishing failed:\n%s" % e)
+
     # ---------------------------------------------------------- share packs
     def share_pack(self):
         """One zip with everything a friend needs to see your rarities: the rarity designs, which card has which rarity and the deck rarities."""
@@ -616,15 +707,15 @@ class Studio(tk.Tk):
         try:
             count = 0
             with zipfile.ZipFile(filename, "w", zipfile.ZIP_DEFLATED) as z:
-                for name in ("custom_rarities.json", "rarities.txt"):
-                    full = os.path.join(folder, name)
+                for name in ("custom_rarities.json", "rarities.txt", "rarity_rules.json", "custom_art/sleeve.png", "custom_art/sleeve_opponent.png", "custom_art/playmat.png"):
+                    full = os.path.join(folder, *name.split("/"))
                     if os.path.exists(full):
                         z.write(full, name)
                         count += 1
                 deck_folder = os.path.join(folder, "deck")
                 if os.path.isdir(deck_folder):
                     for entry in os.listdir(deck_folder):
-                        if entry.endswith(".rarity"):
+                        if entry.endswith((".rarity", ".tags")):
                             z.write(os.path.join(deck_folder, entry), "deck/" + entry)
                             count += 1
             self.set_status("Saved the pack (%d files). Send it to your friend: they press \"Get pack...\"." % count)
@@ -643,7 +734,7 @@ class Studio(tk.Tk):
             with zipfile.ZipFile(filename) as z:
                 for member in z.namelist():
                     name = member.replace("\\", "/")
-                    allowed = name in ("custom_rarities.json", "rarities.txt") or (name.startswith("deck/") and name.endswith(".rarity") and "/" not in name[5:] and ".." not in name)
+                    allowed = name in ("custom_rarities.json", "rarities.txt", "rarity_rules.json", "custom_art/sleeve.png", "custom_art/sleeve_opponent.png", "custom_art/playmat.png") or (name.startswith("deck/") and name.endswith((".rarity", ".tags")) and "/" not in name[5:] and ".." not in name)
                     if not allowed:
                         continue
                     target = os.path.join(folder, *name.split("/"))
@@ -743,7 +834,8 @@ class Studio(tk.Tk):
     def store_settings(self):
         try:
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump({"game_folder": self.game_folder.get(), "auto_apply": self.auto_apply.get()}, f)
+                self.settings.update({"game_folder": self.game_folder.get(), "auto_apply": self.auto_apply.get()})
+                json.dump(self.settings, f)
         except Exception:
             pass
 

@@ -4,6 +4,8 @@
 #include "genesys.h"
 #include "deck_tools.h"
 #include "rarity.h"
+#include "deck_tags.h"
+#include "hand_sim.h"
 #include "repo_manager.h"
 #include "materials.h"
 #include "client_card.h"
@@ -92,7 +94,10 @@ void Game::DrawBackGround() {
 	};
 
 	//draw field
-	DrawTextureRect(matManager.vField, DrawFieldSpell() ? imageManager.tFieldTransparent[three_columns][tfield] : imageManager.tField[three_columns][tfield]);
+	const bool field_spell_shown = DrawFieldSpell();
+	if(imageManager.tPlaymat && !field_spell_shown)
+		DrawTextureRect(matManager.vField, imageManager.tPlaymat); //your own playmat under the zones
+	DrawTextureRect(matManager.vField, field_spell_shown ? imageManager.tFieldTransparent[three_columns][tfield] : imageManager.tField[three_columns][tfield]);
 
 	driver->setMaterial(matManager.mBackLine);
 	//select field
@@ -1253,6 +1258,17 @@ void Game::DrawThumb(const CardDataC* cp, irr::core::vector2di pos, LFList* lfli
 		if(rarity != Rarity::NORMAL)
 			RarityFx::Draw2D(driver, dragloc, rarity, device->getTimer()->getTime(), cliprect);
 	}
+	if(load_image && is_building && !is_siding && !deckBuilder.browser_mode) {
+		//the tag of the card in this deck (T over a card changes it)
+		if(const Tag tag = DeckTags::Get(cp->getRealCode()); tag != Tag::NONE) {
+			static const uint32_t colors[] = { 0, 0xff30b050, 0xff3080e0, 0xffe08a20, 0xffd03030 };
+			static const wchar_t* letters[] = { L"", L"S", L"E", L"H", L"B" };
+			const irr::core::recti badge(dragloc.UpperLeftCorner.X + dragloc.getWidth() * 55 / 100, dragloc.UpperLeftCorner.Y,
+										 dragloc.LowerRightCorner.X, dragloc.UpperLeftCorner.Y + dragloc.getHeight() * 28 / 100);
+			driver->draw2DRectangle(colors[static_cast<int>(tag)], badge, cliprect);
+			DrawShadowText(textFont, std::wstring(letters[static_cast<int>(tag)]), badge, irr::core::recti{ 0, 0, 0, 0 }, 0xffffffff, 0xff000000, true, true);
+		}
+	}
 	if(Genesys::enabled) {
 		if(const int pts = Genesys::Points(cp); pts > 0 && !Genesys::Illegal(cp)) {
 			DrawGenesysBadge(dragloc, pts, cliprect);
@@ -1640,6 +1656,8 @@ bool Game::UpdateArtSync() {
 //the rarity effect over the big card picture of the info panel (drawn after the GUI, which draws the picture itself)
 void Game::DrawRarityPreview() {
 	RarityFx::CheckReload(device->getTimer()->getTime());
+	imageManager.CheckPlaymat(device->getTimer()->getTime());
+	CustomizeTick();
 	if(rarityDefsGen != RarityFx::DefsGeneration())
 		RefillRarityCombo();
 	//the cards of my own that are shown in the card selection / card display windows (searching the deck, the graveyard...)
@@ -1711,6 +1729,7 @@ void Game::DrawRarityPreview() {
 		else if(const int sel = cbDBDecks->getSelected(); sel >= 0)
 			deck_name = cbDBDecks->getItem(sel);
 		RarityFx::EditDeck(deck_name);
+		DeckTags::Edit(deck_name);
 	}
 	if(rarityResetArmed && device->getTimer()->getTime() - rarityResetArmTime > 4000) {
 		rarityResetArmed = 0;
@@ -2209,6 +2228,141 @@ void Game::DrawDeckTools() {
 		bar(390, y + 2, 120, 12, static_cast<double>(s.races[i].first) / max_race, 0xff6090d0);
 		text(num(s.races[i].first), 515, y, 548, y + 16, 0xffffffff);
 	}
+}
+
+void Game::DrawDeckOdds() {
+	if(!wDeckOdds || !wDeckOdds->isVisible())
+		return;
+	if(oddsResetArmed && device->getTimer()->getTime() - oddsResetArmTime > 4000) {
+		oddsResetArmed = false;
+		btnOddsResetTags->setText(L"Reset tags");
+	}
+	const auto win = wDeckOdds->getAbsolutePosition();
+	const float sx = win.getWidth() / 560.0f, sy = win.getHeight() / 540.0f;
+	const auto R = [&](int x0, int y0, int x1, int y1) {
+		return irr::core::recti(win.UpperLeftCorner.X + static_cast<int>(x0 * sx), win.UpperLeftCorner.Y + static_cast<int>(y0 * sy),
+								win.UpperLeftCorner.X + static_cast<int>(x1 * sx), win.UpperLeftCorner.Y + static_cast<int>(y1 * sy));
+	};
+	const auto text = [&](const std::wstring& t, int x0, int y0, int x1, int y1, uint32_t color = 0xffffffff, bool center = false) {
+		DrawShadowText(textFont, t, R(x0, y0, x1, y1), irr::core::recti{ 1, 1, 1, 1 }, color, 0xff000000, center, true);
+	};
+	const auto percent = [](double value) {
+		wchar_t buffer[24];
+		swprintf(buffer, 24, L"%.1f%%", value);
+		return std::wstring(buffer);
+	};
+	//the tags of the main deck, in deck order
+	const auto& deck = deckBuilder.GetCurrentDeck();
+	std::vector<Tag> tags;
+	int unknown = 0, tagged = 0;
+	int cards_of[5] = {};
+	uint64_t hash = 1469598103934665603ull;
+	for(const auto* card : deck.main) {
+		if(!card || (!card->code && !card->alias)) {
+			++unknown;
+			continue;
+		}
+		const Tag tag = DeckTags::Get(card->getRealCode());
+		tags.push_back(tag);
+		++cards_of[static_cast<int>(tag)];
+		if(tag != Tag::NONE)
+			++tagged;
+		hash = (hash ^ static_cast<uint64_t>(tag)) * 1099511628211ull;
+	}
+	const int hand = static_cast<int>(cbOddsHand->getItemData(cbOddsHand->getSelected()));
+	struct Key {
+		uint64_t hash;
+		int hand;
+		uint32_t seed, generation;
+		bool operator==(const Key& o) const { return hash == o.hash && hand == o.hand && seed == o.seed && generation == o.generation; }
+	};
+	static Key last_key{ 0, 0, 0, 0 };
+	static SimResult sim;
+	const Key key{ hash, hand, oddsSeed, DeckTags::Generation() };
+	if(!(key == last_key)) {
+		sim = Simulate(tags, hand, 10000, DeckTags::Rules(), oddsSeed);
+		last_key = key;
+	}
+	//the deck to compare with: loaded and simulated again only when something changed
+	const int compare_index = cbOddsCompare->getSelected();
+	const std::wstring other_name = compare_index > 0 ? std::wstring(cbOddsCompare->getItem(compare_index)) : std::wstring();
+	static std::wstring last_other;
+	static Key last_other_key{ 0, 0, 0, 0 };
+	static SimResult other_sim;
+	static bool other_ok = false, other_has_tags = false;
+	if(other_name.empty()) {
+		last_other.clear();
+	} else if(other_name != last_other || !(key == last_other_key)) {
+		last_other = other_name;
+		last_other_key = key;
+		other_ok = false;
+		other_has_tags = !DeckTags::FileText(other_name).empty();
+		Deck other;
+		if(DeckManager::LoadDeckFromFile(Utils::ToPathString(other_name), other, true)) {
+			const auto data = DeckTags::LoadFor(other_name);
+			std::vector<Tag> other_tags;
+			for(const auto* card : other.main) {
+				if(!card || (!card->code && !card->alias))
+					continue;
+				const auto it = data.tags.find(card->getRealCode());
+				other_tags.push_back(it == data.tags.end() ? Tag::NONE : it->second);
+			}
+			other_sim = Simulate(other_tags, hand, 10000, DeckTags::Rules(), oddsSeed);
+			other_ok = other_sim.runs > 0;
+		}
+	}
+	const bool compare = !other_name.empty() && other_ok && other_has_tags;
+	text(L"Main deck: " + std::to_wstring(tags.size()) + L" cards" + (unknown ? L"  (" + std::to_wstring(unknown) + L" unknown skipped)" : std::wstring()), 15, 62, 340, 82, 0xffd0d0d0);
+	if(sim.runs == 0) {
+		text(L"The main deck has fewer cards than the hand.", 15, 100, 545, 120, 0xffffd060);
+		return;
+	}
+	//the table
+	const int column_x[5] = { 140, 192, 244, 296, 350 };
+	text(L"Tag", 15, 88, 95, 106, 0xffffd060);
+	text(L"cards", 98, 88, 135, 106, 0xffffd060);
+	const wchar_t* headers[5] = { L"0", L"1", L"2", L"3+", L"at least 1" };
+	for(int i = 0; i < 5; ++i)
+		text(headers[i], column_x[i], 88, column_x[i] + (i == 4 ? 70 : 48), 106, 0xffffd060, true);
+	if(compare) {
+		text(L"other deck", 425, 88, 490, 106, 0xffffd060, true);
+		text(L"diff", 492, 88, 545, 106, 0xffffd060, true);
+	}
+	const uint32_t tag_colors[5] = { 0xffffffff, 0xff60d070, 0xff6aa8f0, 0xfff0a040, 0xfff06060 };
+	for(int tag = 1; tag <= 4; ++tag) {
+		const int y = 108 + (tag - 1) * 20;
+		text(std::wstring(TagName(static_cast<Tag>(tag)), TagName(static_cast<Tag>(tag)) + strlen(TagName(static_cast<Tag>(tag)))), 15, y, 95, y + 18, tag_colors[tag]);
+		text(std::to_wstring(cards_of[tag]), 98, y, 135, y + 18, 0xffd0d0d0, true);
+		for(int k = 0; k < 4; ++k)
+			text(percent(sim.Percent(sim.counts[tag][k])), column_x[k], y, column_x[k] + 48, y + 18, 0xffffffff, true);
+		const double at_least = 100.0 - sim.Percent(sim.counts[tag][0]);
+		text(percent(at_least), column_x[4], y, column_x[4] + 70, y + 18, 0xffffffff, true);
+		if(compare) {
+			const double other = 100.0 - other_sim.Percent(other_sim.counts[tag][0]);
+			text(percent(other), 425, y, 490, y + 18, 0xffd0d0d0, true);
+			const double diff = at_least - other;
+			text((diff >= 0 ? L"+" : L"") + percent(diff), 492, y, 545, y + 18, diff >= 0.05 ? 0xff60e060 : (diff <= -0.05 ? 0xffe06060 : 0xffd0d0d0), true);
+		}
+	}
+	if(tagged == 0)
+		text(L"Press T over cards in the deck editor to tag them.", 15, 190, 545, 208, 0xffffd060);
+	//the hand rules
+	const auto& rules = DeckTags::Rules();
+	const int rules_top = tagged == 0 ? 210 : 194;
+	for(size_t r = 0; r < rules.size() && r < sim.rule_hits.size(); ++r) {
+		const int y = rules_top + static_cast<int>(r) * 15;
+		text(std::wstring(rules[r].name.begin(), rules[r].name.end()), 15, y, 340, y + 15, 0xffffffff);
+		const double mine = sim.Percent(sim.rule_hits[r]);
+		text(percent(mine), column_x[4], y, column_x[4] + 70, y + 15, 0xffffffff, true);
+		if(compare && r < other_sim.rule_hits.size()) {
+			const double other = other_sim.Percent(other_sim.rule_hits[r]);
+			text(percent(other), 425, y, 490, y + 15, 0xffd0d0d0, true);
+			const double diff = mine - other;
+			text((diff >= 0 ? L"+" : L"") + percent(diff), 492, y, 545, y + 15, diff >= 0.05 ? 0xff60e060 : (diff <= -0.05 ? 0xffe06060 : 0xffd0d0d0), true);
+		}
+	}
+	if(!other_name.empty() && !other_has_tags)
+		text(other_name + L" has no tags yet", 150, 62, 545, 82, 0xffffd060);
 }
 
 }

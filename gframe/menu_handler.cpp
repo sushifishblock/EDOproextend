@@ -1128,6 +1128,8 @@ bool MenuHandler::OnEvent(const irr::SEvent& event) {
 			}
 			case irr::DROP_END:	{
 				if(to_open_file.size()) {
+					if(mainGame->UseDroppedPicture(to_open_file))
+						return true;
 					auto extension = Utils::GetFileExtension(to_open_file);
 					bool isMenu = !mainGame->wSinglePlay->isVisible() && !mainGame->wReplay->isVisible();
 					if(extension == L"ydk" && isMenu && mainGame->deckBuilder.SetCurrentDeckFromFile(Utils::ToPathString(to_open_file))) {

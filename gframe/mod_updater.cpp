@@ -1,4 +1,6 @@
 #include "mod_updater.h"
+#include "deck_tags.h"
+#include "rarity_rules.h"
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -91,7 +93,11 @@ std::filesystem::path ExePath() {
 }
 }
 
+extern "C" const char kModVersionMarker[] = "EDOPROX_MODVERSION=" MOD_VERSION_STRING;
+
 void ModUpdater::CleanupOld() {
+	static const char* volatile keep_marker = kModVersionMarker; //keeps the marker in the exe
+	(void)keep_marker;
 	std::error_code ec;
 	auto exe = ExePath();
 	if(exe.empty())
@@ -106,47 +112,87 @@ void ModUpdater::StartCheck() {
 	std::thread(&ModUpdater::CheckThread).detach();
 }
 
+namespace {
+bool FetchText(const std::string& url, std::string& body, long max_size = 2 * 1024 * 1024) {
+	auto* curl = curl_easy_init();
+	if(!curl)
+		return false;
+	body.clear();
+	SetCommon(curl, url);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteBody);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+	curl_easy_setopt(curl, CURLOPT_MAXFILESIZE, max_size);
+	const auto result = curl_easy_perform(curl);
+	long status = 0;
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+	curl_easy_cleanup(curl);
+	return result == CURLE_OK && status == 200;
+}
+
+struct Candidate {
+	std::string tag, url;
+	long long size = 0;
+};
+
+//the exe of a release, if it is a plausible file of this project
+bool ExeAsset(const nlohmann::json& release, Candidate& out) {
+	for(const auto& asset : release.at("assets")) {
+		if(asset.at("name").get<std::string>() != "EDOPro-x64.exe")
+			continue;
+		out.url = asset.at("browser_download_url").get<std::string>();
+		out.size = asset.at("size").get<long long>();
+		return out.url.rfind("https://github.com/sushifishblock/EDOproextend/releases/", 0) == 0 && out.size >= 5ll * 1024 * 1024 && out.size <= 200ll * 1024 * 1024;
+	}
+	return false;
+}
+}
+
 void ModUpdater::CheckThread() {
 	try {
 		state = CHECKING;
-		auto* curl = curl_easy_init();
-		if(!curl) {
-			state = IDLE;
-			return;
-		}
+		std::vector<Candidate> found;
 		std::string body;
-		SetCommon(curl, RELEASE_URL);
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteBody);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
-		const auto result = curl_easy_perform(curl);
-		long status = 0;
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-		curl_easy_cleanup(curl);
-		if(result != CURLE_OK || status != 200) {
-			state = IDLE;
-			return;
+		//the newest release
+		if(FetchText(RELEASE_URL, body)) {
+			const auto root = nlohmann::json::parse(body);
+			Candidate c;
+			c.tag = root.at("tag_name").get<std::string>();
+			if(ExeAsset(root, c))
+				found.push_back(c);
 		}
-		const auto root = nlohmann::json::parse(body);
-		const std::string tag = root.at("tag_name").get<std::string>();
-		if(!IsNewer(tag)) {
-			state = IDLE;
-			return;
-		}
-		for(const auto& asset : root.at("assets")) {
-			if(asset.at("name").get<std::string>() == ASSET_NAME) {
-				std::lock_guard<std::mutex> lock(info_mutex);
-				const std::string url = asset.at("browser_download_url").get<std::string>();
-				const long long size = asset.at("size").get<long long>();
-				//only a file of this project's releases, with a plausible size
-				if(url.rfind("https://github.com/sushifishblock/EDOproextend/releases/", 0) != 0 || size < 5ll * 1024 * 1024 || size > 200ll * 1024 * 1024)
-					break;
-				latest_tag = tag;
-				asset_url = url;
-				asset_size = size;
-				state = AVAILABLE;
-				return;
+		//a build the author published from the Rarity Studio (release "rarity-pack"): the file is named EDOPro-x64-<version>.exe
+		//(a new address for every version, so an old copy that is cached somewhere is never served for a new version)
+		try {
+			if(FetchText("https://api.github.com/repos/sushifishblock/EDOproextend/releases/tags/rarity-pack", body)) {
+				const auto root = nlohmann::json::parse(body);
+				for(const auto& asset : root.at("assets")) {
+					const std::string name = asset.at("name").get<std::string>();
+					if(name.rfind("EDOPro-x64-", 0) != 0 || name.size() < 16 || name.compare(name.size() - 4, 4, ".exe") != 0)
+						continue;
+					Candidate c;
+					c.tag = name.substr(11, name.size() - 15);
+					c.url = asset.at("browser_download_url").get<std::string>();
+					c.size = asset.at("size").get<long long>();
+					if(c.url.rfind("https://github.com/sushifishblock/EDOproextend/releases/", 0) == 0 && c.size >= 5ll * 1024 * 1024 && c.size <= 200ll * 1024 * 1024)
+						found.push_back(c);
+				}
 			}
+		} catch(...) {}
+		const Candidate* best = nullptr;
+		for(const auto& c : found) {
+			if(!IsNewer(c.tag))
+				continue;
+			if(!best || ParseVersion(c.tag) > ParseVersion(best->tag))
+				best = &c;
+		}
+		if(best) {
+			std::lock_guard<std::mutex> lock(info_mutex);
+			latest_tag = best->tag;
+			asset_url = best->url;
+			asset_size = best->size;
+			state = AVAILABLE;
+			return;
 		}
 	} catch(...) {}
 	if(state == CHECKING)
@@ -281,7 +327,42 @@ std::wstring ModUpdater::Label() {
 namespace {
 constexpr const char* PACK_RELEASE_URL = "https://api.github.com/repos/sushifishblock/EDOproextend/releases/tags/rarity-pack";
 constexpr const char* PACK_ASSET = "rarity_pack.json";
-constexpr size_t PACK_MAX_SIZE = 4 * 1024 * 1024;
+constexpr size_t PACK_MAX_SIZE = 12 * 1024 * 1024;
+constexpr size_t ART_MAX_SIZE = 4 * 1024 * 1024; //one picture of the pack (after decoding)
+
+//the pictures of the pack: only these names, written to custom_art/
+bool SafeArtName(const std::string& name) {
+	return name == "sleeve.png" || name == "sleeve_opponent.png" || name == "playmat.png";
+}
+
+bool DecodeBase64(const std::string& text, std::string& out) {
+	out.clear();
+	uint32_t bits = 0;
+	int count = 0;
+	for(const unsigned char c : text) {
+		int value;
+		if(c >= 'A' && c <= 'Z') value = c - 'A';
+		else if(c >= 'a' && c <= 'z') value = c - 'a' + 26;
+		else if(c >= '0' && c <= '9') value = c - '0' + 52;
+		else if(c == '+') value = 62;
+		else if(c == '/') value = 63;
+		else if(c == '=' || c == '\n' || c == '\r') continue;
+		else return false;
+		bits = (bits << 6) | value;
+		count += 6;
+		if(count >= 8) {
+			count -= 8;
+			out.push_back(static_cast<char>((bits >> count) & 0xff));
+			if(out.size() > ART_MAX_SIZE)
+				return false;
+		}
+	}
+	return true;
+}
+
+bool LooksLikePng(const std::string& data) {
+	return data.size() > 64 && data.compare(0, 8, "\x89PNG\r\n\x1a\n", 8) == 0;
+}
 
 bool HttpGet(const std::string& url, std::string& body) {
 	auto* curl = curl_easy_init();
@@ -438,9 +519,52 @@ void RarityPack::InstallThread() {
 				decks.emplace_back(item.key(), text);
 			}
 		}
-		if(designs.empty() && assignments.empty() && decks.empty())
+		std::vector<std::pair<std::wstring, std::string>> tag_files;
+		if(pack.contains("tags") && pack["tags"].is_object()) {
+			for(const auto& item : pack["tags"].items()) {
+				if(!item.value().is_string() || !SafeDeckName(item.key()))
+					continue;
+				const std::string text = item.value().get<std::string>();
+				if(!SafeTagText(text))
+					continue;
+				tag_files.emplace_back(std::filesystem::u8path(item.key()).wstring(), text);
+			}
+		}
+		std::string rules_text;
+		if(pack.contains("rarity_rules") && pack["rarity_rules"].is_object()) {
+			std::vector<RarityRule> check;
+			const std::string text = pack["rarity_rules"].dump(1);
+			if(RarityRules::Parse(text, check))
+				rules_text = text;
+		}
+		std::vector<std::pair<std::string, std::string>> art_files;
+		const bool has_art_key = pack.contains("art") && pack["art"].is_object();
+		if(has_art_key) {
+			for(const auto& item : pack["art"].items()) {
+				std::string data;
+				if(!item.value().is_string() || !SafeArtName(item.key()) || !DecodeBase64(item.value().get<std::string>(), data) || !LooksLikePng(data))
+					continue;
+				art_files.emplace_back(item.key(), std::move(data));
+			}
+		}
+		if(designs.empty() && assignments.empty() && decks.empty() && tag_files.empty() && rules_text.empty() && !has_art_key)
 			throw std::runtime_error("empty");
 		std::error_code ec;
+		if(!rules_text.empty())
+			WriteWithBackup("rarity_rules.json", rules_text);
+		if(has_art_key) {
+			//the pack decides the whole look: a picture it does not have is removed (the default one is used again)
+			std::filesystem::create_directories("custom_art", ec);
+			for(const char* name : { "sleeve.png", "sleeve_opponent.png", "playmat.png" }) {
+				bool in_pack = false;
+				for(const auto& file : art_files)
+					in_pack = in_pack || file.first == name;
+				if(!in_pack)
+					std::filesystem::remove(std::filesystem::path("custom_art") / name, ec);
+			}
+			for(const auto& file : art_files)
+				WriteWithBackup(std::filesystem::path("custom_art") / file.first, file.second);
+		}
 		if(!designs.empty())
 			WriteWithBackup("custom_rarities.json", designs);
 		if(!assignments.empty())
@@ -450,6 +574,8 @@ void RarityPack::InstallThread() {
 			for(const auto& deck : decks)
 				WriteWithBackup(std::filesystem::path("deck") / std::filesystem::u8path(deck.first + ".rarity"), deck.second);
 		}
+		for(const auto& file : tag_files)
+			DeckTags::WriteText(file.first, file.second);
 		std::ofstream("rarity_pack.id", std::ios::trunc) << id;
 		done_at = NowSeconds();
 		installed = true;

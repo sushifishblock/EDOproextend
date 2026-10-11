@@ -398,6 +398,16 @@ epro::wstringview DataManager::GetDesc(uint64_t strCode, bool compat) const {
 		return unknown_string;
 	return desc;
 }
+std::vector<std::pair<uint32_t, std::wstring>> DataManager::GetSetNames() const {
+	std::vector<std::pair<uint32_t, std::wstring>> names;
+	for(const auto& entry : _setnameStrings.map) {
+		const auto name = _setnameStrings.GetLocale(entry.first, L"");
+		if(!name.empty())
+			names.emplace_back(entry.first, std::wstring(name));
+	}
+	return names;
+}
+
 std::vector<uint16_t> DataManager::GetSetCode(const std::vector<epro::wstringview>& setname) const {
 	std::vector<uint16_t> res;
 	for(const auto& [setcode, localized_name] : _setnameStrings.map) {

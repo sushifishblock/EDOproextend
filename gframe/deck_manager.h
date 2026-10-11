@@ -40,10 +40,10 @@ class DeckManager {
 private:
 	size_t null_lflist_index = ~size_t();
 	mutable std::unordered_map<uint32_t, CardDataC*> dummy_entries;
-	const CardDataC* GetDummyOrMappedCardData(uint32_t code) const;
 	bool load_dummies{ true };
 	static inline epro::path_string deck_folder = EPRO_TEXT("./deck/");
 public:
+	const CardDataC* GetDummyOrMappedCardData(uint32_t code) const; //(also used by the deck history)
 	Deck sent_deck;
 	Deck pre_deck;
 	std::vector<LFList> _lfList;

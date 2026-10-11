@@ -10,6 +10,7 @@
 #include "settings_window.h"
 #include "config.h"
 #include "ai_assistant.h"
+#include "deck_history.h"
 #include "art_sync.h"
 #include "common.h"
 #include "mysignal.h"
@@ -248,6 +249,41 @@ struct main_menu_panel_elements {
 	irr::gui::IGUIWindow* wDeckDiff = nullptr;
 	irr::gui::IGUIComboBox* cbDeckDiff = nullptr;
 	irr::gui::IGUIListBox* lstDeckDiff = nullptr;
+	//the Odds window (hand odds of the tagged deck)
+	irr::gui::IGUIButton* btnDeckOdds = nullptr;
+	irr::gui::IGUIWindow* wDeckOdds = nullptr;
+	irr::gui::IGUIWindow* wCustomize = nullptr; //rarity rules, sleeves and playmat (customize.cpp)
+	irr::gui::IGUIButton* btnCustomize = nullptr;
+	irr::gui::IGUIWindow* wSleeveRestart = nullptr; //asks whether to restart so a new sleeve shows
+	irr::gui::IGUIComboBox* cbOddsHand = nullptr;
+	irr::gui::IGUIComboBox* cbOddsCompare = nullptr;
+	irr::gui::IGUIComboBox* cbOddsRule = nullptr;
+	irr::gui::IGUIEditBox* ebOddsRuleName = nullptr;
+	irr::gui::IGUIComboBox* cbOddsTag[4] = {};
+	irr::gui::IGUIComboBox* cbOddsCmp[4] = {};
+	irr::gui::IGUIEditBox* ebOddsN[4] = {};
+	irr::gui::IGUIButton* btnOddsReroll = nullptr;
+	//undo / redo of the deck being edited and its saved versions
+	irr::gui::IGUIButton* btnDeckUndo = nullptr;
+	irr::gui::IGUIButton* btnDeckRedo = nullptr;
+	irr::gui::IGUIButton* btnDeckVersions = nullptr;
+	irr::gui::IGUIButton* btnVersionsClear = nullptr;
+	irr::gui::IGUIWindow* wDeckVersions = nullptr;
+	irr::gui::IGUIListBox* lstVersions = nullptr;
+	irr::gui::IGUIListBox* lstVersionDiff = nullptr;
+	DeckHistory deckHistory;
+	std::wstring deckHistoryName;
+	bool deckHistoryValid = false;
+	std::vector<VersionFile> versionFiles;
+	std::wstring versionsDeckName;
+	bool versionsClearArmed = false;
+	unsigned versionsClearArmTime = 0;
+	irr::gui::IGUIButton* btnOddsResetTags = nullptr;
+	bool oddsResetArmed = false;
+	unsigned oddsResetArmTime = 0;
+	int oddsRuleSel = 0;
+	bool oddsRefreshing = false;
+	uint32_t oddsSeed = 12345;
 	std::wstring modUpdateLabel;
 	bool modUpdateLaunched = false;
 	uint32_t artPreloadGeneration = 0xffffffffu;
@@ -593,6 +629,26 @@ public:
 	bool ApplySkin(const epro::path_string& skin, bool reload = false, bool firstrun = false);
 	void RefreshDeck(irr::gui::IGUIComboBox* cbDeck);
 	void DrawDeckTools();
+	void CreateCustomizeWindow();
+	void OpenCustomizeWindow();
+	bool OnCustomizeEvent(const irr::SEvent& event);
+	void CustomizeTick();
+	bool UseDroppedPicture(const std::wstring& path);
+	std::wstring CurrentDeckName();
+	void UpdateDeckHistory();
+	void DeckUndo(bool redo);
+	void CreateVersionsWindow();
+	void OpenVersionsWindow();
+	void RefreshVersionsList();
+	void ShowSelectedVersionDiff();
+	bool OnVersionsEvent(const irr::SEvent& event);
+	void DrawDeckOdds();
+	void CreateOddsWindow();
+	void OpenOddsWindow();
+	void RefreshOddsRuleEditor();
+	void RefillOddsRuleList();
+	void ApplyOddsRuleEdits();
+	bool OnOddsEvent(const irr::SEvent& event);
 	void RefillRarityCombo();
 	void SelectRarityItem(Rarity rarity);
 	void RefreshDeckDiff();

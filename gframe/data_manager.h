@@ -176,6 +176,8 @@ public:
 		return (2500 - 30) + race_idx;
 	}
 	std::vector<uint16_t> GetSetCode(const std::vector<epro::wstringview>& setname) const;
+	//every archetype (set code, name), in code order
+	std::vector<std::pair<uint32_t, std::wstring>> GetSetNames() const;
 	std::wstring GetNumString(size_t num, bool bracket = false) const;
 	epro::wstringview FormatLocation(uint32_t location, int sequence) const;
 	std::wstring FormatAttribute(uint32_t attribute) const;

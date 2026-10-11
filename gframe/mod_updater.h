@@ -5,13 +5,16 @@
 #include <mutex>
 #include <string>
 
+//the Studio reads this text from the exe when it publishes a build for friends
+#define MOD_VERSION_STRING "1.8.3"
+
 namespace ygo {
 
 //One-click updater for this mod: checks the latest GitHub release in the background, and on a click downloads the
 //EDOPro-x64.exe asset, swaps it in for the running exe (a running exe can be renamed) and starts the new one.
 class ModUpdater {
 public:
-	static constexpr const char* VERSION = "1.5.0";
+	static constexpr const char* VERSION = MOD_VERSION_STRING;
 	enum State { IDLE, CHECKING, AVAILABLE, DOWNLOADING, FAILED, RESTART };
 	//deletes the exe left over from the previous update
 	static void CleanupOld();

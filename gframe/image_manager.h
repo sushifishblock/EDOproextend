@@ -185,6 +185,8 @@ private:
 public:
 	irr::video::ITexture* tCover[2];
 	irr::video::ITexture* tUnknown;
+	irr::video::ITexture* tPlaymat = nullptr; //custom_art/playmat.png, nullptr when there is none
+	void CheckPlaymat(uint32_t now_ms);
 #define A(what) \
 		public: \
 		irr::video::ITexture* what;\
@@ -256,6 +258,8 @@ private:
 	irr::video::IImage* ReadCardCache(uint32_t code, int width, int height, uint64_t src_size, int64_t src_mtime, bool any_size = false);
 	void WriteCardCache(uint32_t code, irr::video::IImage* image, uint64_t src_size, int64_t src_mtime);
 	void RefreshCovers();
+	irr::video::ITexture* LoadCustomArt(const char* file, int width, int height);
+	void ApplyCustomSleeves(int width, int height);
 	void LoadPic();
 	irr::video::ITexture* loadTextureFixedSize(epro::path_stringview texture_name, int width, int height);
 	irr::video::ITexture* loadTextureAnySize(epro::path_stringview texture_name);

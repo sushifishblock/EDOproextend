@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 #include <irrlicht.h>
+#include "rarity_rules.h"
 
 namespace ygo {
 
@@ -27,6 +28,13 @@ public:
 	static Rarity Get(uint32_t code);
 	static void Set(uint32_t code, Rarity rarity);
 	static const wchar_t* Name(Rarity rarity);
+	//the id used in rarity_rules.json ("SR", "UR", ... "C8")
+	static const char* Id(Rarity rarity);
+	//the rarity rules (rarity_rules.json). SetRules saves them and applies them at once.
+	static const std::vector<RarityRule>& Rules() { return rules; }
+	static void SetRules(std::vector<RarityRule> fresh);
+	//how many cards the rule at `index` is the first to catch (names of a few of them go to `sample`)
+	static size_t CountCaught(const std::vector<RarityRule>& list, size_t index, std::vector<std::wstring>& sample, size_t max_sample);
 	//a rarity that can be picked: the built-in ones and the custom ones that are defined in custom_rarities.json
 	static bool Defined(Rarity rarity);
 	//changes when custom_rarities.json was (re)loaded
@@ -87,6 +95,11 @@ private:
 	static inline std::wstring duel_name;
 	static inline int mouse_x = -10000, mouse_y = -10000;
 	static void Save();
+	static void ReadAssignments();
+	static Rarity RuleRarity(uint32_t code);
+	static void CheckRulesReload(uint32_t now_ms);
+	static inline std::vector<RarityRule> rules; //rarity_rules.json
+	static inline std::unordered_map<uint32_t, uint8_t> rule_cache;
 	static inline std::unordered_map<uint32_t, Rarity> chosen;
 };
 

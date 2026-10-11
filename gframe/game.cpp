@@ -250,7 +250,7 @@ void Game::Initialize() {
 	int mainMenuWidth = std::max(280, static_cast<int>(titleWidth / dpi_scale + 15));
 	mainMenuLeftX = 510 - mainMenuWidth / 2;
 	mainMenuRightX = 510 + mainMenuWidth / 2;
-	wMainMenu = env->addWindow(Scale(mainMenuLeftX, 200, mainMenuRightX, 485), false, EDOPRO_VERSION_STRING);
+	wMainMenu = env->addWindow(Scale(mainMenuLeftX, 200, mainMenuRightX, 520), false, EDOPRO_VERSION_STRING);
 	wMainMenu->getCloseButton()->setVisible(false);
 	//wMainMenu->setVisible(!is_from_discord);
 #define OFFSET(x1, y1, x2, y2) Scale(10, 30 + offset, mainMenuWidth - 10, 60 + offset)
@@ -271,6 +271,8 @@ void Game::Initialize() {
 	defaultStrings.emplace_back(btnDeckEdit, 1204);
 	offset += 35;
 	btnCardBrowser = env->addButton(OFFSET(10, 135, 270, 165), wMainMenu, BUTTON_CARD_BROWSER, L"Card Browser");
+	offset += 35;
+	btnCustomize = env->addButton(OFFSET(10, 135, 270, 165), wMainMenu, BUTTON_CUSTOMIZE, L"Customize");
 	offset += 35;
 	btnModeExit = env->addButton(OFFSET(10, 170, 270, 200), wMainMenu, BUTTON_MODE_EXIT, gDataManager->GetSysString(1210).data());
 	defaultStrings.emplace_back(btnModeExit, 1210);
@@ -580,15 +582,23 @@ void Game::Initialize() {
 	stArtSyncBlock->setVisible(false);
 	btnArtSyncContinue = AlignElementWithParent(env->addButton(Scale(392, 440, 632, 476), 0, BUTTON_ART_SYNC_CONTINUE, L"No connection - continue anyway"));
 	btnArtSyncContinue->setVisible(false);
-	btnModUpdate = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 492, mainMenuRightX + 40, 524), 0, BUTTON_MOD_UPDATE, L""));
+	btnModUpdate = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 527, mainMenuRightX + 40, 559), 0, BUTTON_MOD_UPDATE, L""));
 	btnModUpdate->setVisible(false);
-	btnRarityPack = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 530, mainMenuRightX + 40, 562), 0, BUTTON_RARITY_PACK, L""));
+	btnRarityPack = AlignElementWithParent(env->addButton(Scale(mainMenuLeftX - 40, 565, mainMenuRightX + 40, 597), 0, BUTTON_RARITY_PACK, L""));
 	btnRarityPack->setVisible(false);
 	RarityPack::StartCheck();
-	btnDeckStats = AlignElementWithParent(env->addButton(Scale(530, 538, 595, 556), 0, BUTTON_DECK_STATS, L"Stats"));
-	btnDeckDiff = AlignElementWithParent(env->addButton(Scale(600, 538, 670, 556), 0, BUTTON_DECK_DIFF, L"Compare"));
+	btnDeckStats = AlignElementWithParent(env->addButton(Scale(450, 538, 502, 556), 0, BUTTON_DECK_STATS, L"Stats"));
+	btnDeckDiff = AlignElementWithParent(env->addButton(Scale(506, 538, 562, 556), 0, BUTTON_DECK_DIFF, L"Compare"));
 	btnDeckStats->setVisible(false);
 	btnDeckDiff->setVisible(false);
+	btnDeckOdds = AlignElementWithParent(env->addButton(Scale(566, 538, 608, 556), 0, BUTTON_DECK_ODDS, L"Odds"));
+	btnDeckOdds->setVisible(false);
+	btnDeckVersions = AlignElementWithParent(env->addButton(Scale(612, 538, 676, 556), 0, BUTTON_DECK_VERSIONS, L"Versions"));
+	btnDeckVersions->setVisible(false);
+	btnDeckUndo = AlignElementWithParent(env->addButton(Scale(440, 441, 478, 459), 0, BUTTON_DECK_UNDO, L"Undo"));
+	btnDeckRedo = AlignElementWithParent(env->addButton(Scale(482, 441, 520, 459), 0, BUTTON_DECK_REDO, L"Redo"));
+	btnDeckUndo->setVisible(false);
+	btnDeckRedo->setVisible(false);
 	wDeckStats = env->addWindow(Scale(232, 50, 792, 590), false, L"Deck statistics");
 	wDeckStats->getCloseButton()->setVisible(false);
 	wDeckStats->setVisible(false);
@@ -600,6 +610,9 @@ void Game::Initialize() {
 	cbDeckDiff = env->addComboBox(Scale(200, 32, 545, 54), wDeckDiff, COMBOBOX_DECK_DIFF);
 	lstDeckDiff = env->addListBox(Scale(15, 62, 545, 495), wDeckDiff, -1, true);
 	env->addButton(Scale(230, 505, 330, 530), wDeckDiff, BUTTON_DECK_TOOLS_CLOSE, L"Close");
+	CreateOddsWindow();
+	CreateVersionsWindow();
+	CreateCustomizeWindow();
 	ModUpdater::CleanupOld();
 	ModUpdater::StartCheck();
 	RarityFx::Load();
@@ -2111,11 +2124,18 @@ bool Game::MainLoop() {
 				const auto mouse = cursor->getPosition();
 				RarityFx::SetMouse(mouse.X, mouse.Y);
 			}
+			UpdateDeckHistory();
 			const bool tools = is_building && !is_siding && !deckBuilder.browser_mode;
 			if(btnDeckStats->isVisible() != tools) {
 				btnDeckStats->setVisible(tools);
 				btnDeckDiff->setVisible(tools);
+				btnDeckOdds->setVisible(tools);
+				btnDeckVersions->setVisible(tools);
+				btnDeckUndo->setVisible(tools);
+				btnDeckRedo->setVisible(tools);
 				if(!tools) {
+					wDeckVersions->setVisible(false);
+					wDeckOdds->setVisible(false);
 					wDeckStats->setVisible(false);
 					wDeckDiff->setVisible(false);
 				}
@@ -2291,6 +2311,7 @@ bool Game::MainLoop() {
 		DrawGUI();
 		DrawSpec();
 		DrawDeckTools();
+		DrawDeckOdds();
 		DrawRarityPreview();
 		DrawArtPreloadStatus();
 		DrawArtSync();
@@ -3862,7 +3883,7 @@ void Game::OnResize() {
 		stAbout->setRelativePosition(irr::core::recti(10, 10, minwidth, minheight));
 	}
 	wRoomListPlaceholder->setRelativePosition(irr::core::recti(0, 0, window_size.Width, window_size.Height));
-	wMainMenu->setRelativePosition(ResizeWin(mainMenuLeftX, 200, mainMenuRightX, 485));
+	wMainMenu->setRelativePosition(ResizeWin(mainMenuLeftX, 200, mainMenuRightX, 520));
 	wBtnSettings->setRelativePosition(ResizeWin(0, 610, 30, 640));
 	SetCentered(wCommitsLog);
 	SetCentered(updateWindow, false);
@@ -3870,6 +3891,10 @@ void Game::OnResize() {
 	SetCentered(wYdkeManage, false);
 	SetCentered(wDeckStats, false);
 	SetCentered(wDeckDiff, false);
+	SetCentered(wDeckOdds, false);
+	SetCentered(wDeckVersions, false);
+	SetCentered(wCustomize, false);
+	SetCentered(wSleeveRestart, false);
 	SetCentered(wHandTest, false);
 
 	wCategories->setRelativePosition(ResizeWin(450, 60, 1000, 270));

@@ -117,6 +117,7 @@ bool ImageManager::Initial() {
 	tCover[1] = loadTextureFixedSize(EPRO_TEXT("cover2"sv), CARD_IMG_WIDTH, CARD_IMG_HEIGHT);
 	if(!tCover[1])
 		tCover[1] = tCover[0];
+	ApplyCustomSleeves(mainGame->Scale(CARD_IMG_WIDTH), mainGame->Scale(CARD_IMG_HEIGHT));
 
 	tUnknown = loadTextureFixedSize(EPRO_TEXT("unknown"sv), CARD_IMG_WIDTH, CARD_IMG_HEIGHT);
 	ASSERT_TEXTURE_LOADED(tUnknown, "unknown");
@@ -673,7 +674,62 @@ void ImageManager::RefreshCovers() {
 	reloadTextureWithNewSizes(tCover[1], EPRO_TEXT("cover2"sv));
 	if(!tCover[1])
 		tCover[1] = tCover[0];
+	ApplyCustomSleeves(static_cast<int>(sizes[1].first), static_cast<int>(sizes[1].second));
 	reloadTextureWithNewSizes(tUnknown, EPRO_TEXT("unknown"sv));
+}
+
+//custom_art/sleeve.png (your cards) and custom_art/sleeve_opponent.png (the opponent's) replace the default card backs; made with the Rarity Studio
+irr::video::ITexture* ImageManager::LoadCustomArt(const char* file, int width, int height) {
+	std::error_code ec;
+	if(!std::filesystem::exists(file, ec))
+		return nullptr;
+	return GetTextureFromFile(file, width, height);
+}
+
+void ImageManager::ApplyCustomSleeves(int width, int height) {
+	auto* mine = LoadCustomArt("custom_art/sleeve.png", width, height);
+	auto* theirs = LoadCustomArt("custom_art/sleeve_opponent.png", width, height);
+	if(mine) {
+		if(tCover[1] != tCover[0]) //(when they are the same texture, the default stays as the opponent's)
+			driver->removeTexture(tCover[0]);
+		tCover[0] = mine;
+	}
+	if(theirs) {
+		if(tCover[1] != tCover[0])
+			driver->removeTexture(tCover[1]);
+		tCover[1] = theirs;
+	}
+}
+
+//custom_art/playmat.png is drawn under the zones of the duel field; checked once a second, so the Studio shows changes at once
+void ImageManager::CheckPlaymat(uint32_t now_ms) {
+	static uint32_t last_check = 0;
+	static bool first = true;
+	static bool had_file = false;
+	static std::filesystem::file_time_type last_time;
+	if(!first && now_ms - last_check < 1000)
+		return;
+	first = false;
+	last_check = now_ms;
+	std::error_code ec;
+	const auto time = std::filesystem::last_write_time("custom_art/playmat.png", ec);
+	if(ec) {
+		if(had_file) {
+			had_file = false;
+			if(tPlaymat)
+				driver->removeTexture(std::exchange(tPlaymat, nullptr));
+		}
+		return;
+	}
+	if(had_file && time == last_time)
+		return;
+	if(tPlaymat)
+		driver->removeTexture(std::exchange(tPlaymat, nullptr));
+	tPlaymat = driver->getTexture("custom_art/playmat.png");
+	if(tPlaymat) {
+		had_file = true;
+		last_time = time;
+	}
 }
 void ImageManager::LoadPic() {
 	Utils::SetThreadName("PicLoader");

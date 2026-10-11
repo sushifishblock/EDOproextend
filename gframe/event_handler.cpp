@@ -1787,6 +1787,8 @@ bool ClientField::OnCommonEvent(const irr::SEvent& event, bool& stopPropagation)
 	switch(event.EventType) {
 	case irr::EET_GUI_EVENT: {
 		auto id = event.GUIEvent.Caller->getID();
+		if(mainGame->OnCustomizeEvent(event))
+			return true;
 		if(mainGame->menuHandler.IsSynchronizedElement(id))
 			mainGame->menuHandler.SynchronizeElement(event.GUIEvent.Caller);
 		switch(event.GUIEvent.EventType) {

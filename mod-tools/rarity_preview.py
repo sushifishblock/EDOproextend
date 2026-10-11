@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 SIZE = 256
 SPEED = 1.8  # the game moves everything 1.8 times faster than the "per second" numbers
-ART = (0.120, 0.880, 0.180, 0.705)
+ART = (0.112, 0.888, 0.180, 0.711)
 NAME = (0.06, 0.80, 0.030, 0.110)
 Y, X = np.mgrid[0:SIZE, 0:SIZE]
 Xf, Yf = X.astype(np.float32), Y.astype(np.float32)
