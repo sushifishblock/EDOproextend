@@ -419,7 +419,7 @@ void Game::DrawCard(ClientCard* pcard) {
 			}
 			const auto alpha = static_cast<uint32_t>(std::clamp(std::round(pcard->curAlpha), 0.0f, 255.0f));
 			if(const auto rarity = DuelCardRarity(pcard); rarity != Rarity::NORMAL) {
-				RarityFx::Draw3D(driver, matManager.mRarity, rarity, device->getTimer()->getTime(), alpha);
+				RarityFx::Draw3D(driver, matManager.mRarity, rarity, device->getTimer()->getTime(), alpha, pcard->code);
 				const long long age = now - pcard->shine_start;
 				if(age >= 0 && age < 1000)
 					RarityFx::DrawShine3D(driver, matManager.mRarity, age / 1000.0f, alpha);
@@ -1256,7 +1256,7 @@ void Game::DrawThumb(const CardDataC* cp, irr::core::vector2di pos, LFList* lfli
 	if(load_image) {
 		const auto rarity = thumb_override >= 0 ? static_cast<Rarity>(thumb_override) : RarityFx::GetFor(code, -1);
 		if(rarity != Rarity::NORMAL)
-			RarityFx::Draw2D(driver, dragloc, rarity, device->getTimer()->getTime(), cliprect);
+			RarityFx::Draw2D(driver, dragloc, rarity, device->getTimer()->getTime(), cliprect, false, code);
 	}
 	if(load_image && is_building && !is_siding && !deckBuilder.browser_mode) {
 		//the tag of the card in this deck (T over a card changes it)
@@ -1681,7 +1681,7 @@ void Game::DrawRarityPreview() {
 				const int card_h = static_cast<int>(box.getHeight() * 0.93f);
 				const int card_w = static_cast<int>(card_h * static_cast<float>(CARD_IMG_WIDTH) / CARD_IMG_HEIGHT);
 				const auto center = box.getCenter();
-				RarityFx::Draw2D(driver, irr::core::recti(center.X - card_w / 2, center.Y - card_h / 2, center.X + card_w / 2, center.Y + card_h / 2), rarity, device->getTimer()->getTime(), &clip);
+				RarityFx::Draw2D(driver, irr::core::recti(center.X - card_w / 2, center.Y - card_h / 2, center.X + card_w / 2, center.Y + card_h / 2), rarity, device->getTimer()->getTime(), &clip, false, card->code);
 			}
 		};
 		//the battle position window shows the card upright (attack) and lying down (defense)
@@ -1697,7 +1697,7 @@ void Game::DrawRarityPreview() {
 					return irr::core::recti(center.X - w / 2, center.Y - h / 2, center.X + w / 2, center.Y + h / 2);
 				};
 				if(btnPSAU->isVisible())
-					RarityFx::Draw2D(driver, card_rect(btnPSAU, false), rarity, device->getTimer()->getTime(), &wPosSelect->getAbsolutePosition());
+					RarityFx::Draw2D(driver, card_rect(btnPSAU, false), rarity, device->getTimer()->getTime(), &wPosSelect->getAbsolutePosition(), false, posSelectCode);
 				if(btnPSDU->isVisible())
 					RarityFx::Draw2D(driver, card_rect(btnPSDU, true), rarity, device->getTimer()->getTime(), &wPosSelect->getAbsolutePosition(), true);
 			}
@@ -1809,7 +1809,7 @@ void Game::DrawRarityPreview() {
 	}
 	if(rarity == Rarity::NORMAL)
 		return;
-	RarityFx::Draw2D(driver, imgCard->getAbsolutePosition(), rarity, device->getTimer()->getTime(), nullptr);
+	RarityFx::Draw2D(driver, imgCard->getAbsolutePosition(), rarity, device->getTimer()->getTime(), nullptr, false, showingcard);
 }
 void Game::DrawArtSync() {
 	if(!artSync)
@@ -2081,7 +2081,7 @@ void Game::DrawCardBrowser() {
 			const auto size = img->getOriginalSize();
 			driver->draw2DImage(img, cell, irr::core::recti(0, 0, size.Width, size.Height), &clip);
 			if(const auto rarity = RarityFx::GetFor(ptr->code, -1); rarity != Rarity::NORMAL)
-				RarityFx::Draw2D(driver, cell, rarity, device->getTimer()->getTime(), &clip);
+				RarityFx::Draw2D(driver, cell, rarity, device->getTimer()->getTime(), &clip, false, ptr->code);
 			//ban list marker
 			const int limit = deckBuilder.GetCardLimit(ptr);
 			const auto limitloc = Resize(static_cast<int>(x), static_cast<int>(y), static_cast<int>(x) + 22, static_cast<int>(y) + 22);

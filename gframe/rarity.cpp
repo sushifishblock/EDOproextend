@@ -1,5 +1,8 @@
 #include "rarity.h"
 #include "data_manager.h"
+#include "rarity_fullart.h"
+#include "rarity_relief.h"
+#include "relief.h"
 #include "rarity_rules.h"
 #include <algorithm>
 #include <array>
@@ -15,7 +18,7 @@ namespace ygo {
 namespace {
 using namespace irr;
 
-enum class Pattern { FLAT, SHEEN, GLITTER, LINES, DOTS, CLOUD, BEAM, RAYS, HATCH, VDASH, GLOW, HATCHBAND, VDASHBAND, VIGNETTE, WEAVEBAND, WEAVE, COUNT };
+enum class Pattern { FLAT, SHEEN, GLITTER, LINES, DOTS, CLOUD, BEAM, RAYS, HATCH, VDASH, GLOW, HATCHBAND, VDASHBAND, VIGNETTE, WEAVEBAND, WEAVE, MOSAIC, PRISM, OUTLINE, FULLART, COUNT };
 enum class Region { CARD, ART, NAME, BORDER };
 
 //one moving layer of an effect
@@ -366,6 +369,31 @@ video::ITexture* MakePattern(video::IVideoDriver* driver, Pattern pattern) {
 			}
 		}
 		break;
+	case Pattern::MOSAIC:
+		//a grid of tiny 3x3 pixel squares (4 pixel cells), each with its own random brightness and a rainbow hue that runs along the diagonal: the fine "starlight" texture
+		for(int y = 0; y < size; ++y) {
+			for(int x = 0; x < size; ++x) {
+				if(x % 4 > 2 || y % 4 > 2)
+					continue;
+				const int cx = x / 4, cy = y / 4;
+				const uint32_t r = Hash(static_cast<uint32_t>(cy * 64 + cx + 12345));
+				const float b = (r & 255) / 255.0f;
+				const float jitter = ((r >> 8) & 255) / 255.0f;
+				const float hue = static_cast<float>((cx + cy) % 32) / 32.0f + jitter * 0.3f;
+				image->setPixel(x, y, Hsv(hue, 0.75f, 1.0f, static_cast<int>(255 * b * b * b)));
+			}
+		}
+		break;
+	case Pattern::PRISM:
+		//a soft rainbow wash: two full rainbows along the diagonal, a little stronger and weaker across
+		for(int y = 0; y < size; ++y) {
+			for(int x = 0; x < size; ++x) {
+				const float hue = 2.0f * static_cast<float>((x + y) % size) / size;
+				const float a = 0.75f + 0.25f * std::sin(two_pi * static_cast<float>(((x - y) % size + size) % size) / size);
+				image->setPixel(x, y, Hsv(hue, 0.65f, 1.0f, static_cast<int>(255 * a)));
+			}
+		}
+		break;
 	default:
 		break;
 	}
@@ -501,7 +529,7 @@ uint32_t defs_generation = 0;
 bool layer_cache_built[static_cast<int>(Rarity::COUNT)] = {};
 std::vector<Layer> layer_cache[static_cast<int>(Rarity::COUNT)];
 
-const char* const PATTERN_NAMES[] = { "FLAT", "SHEEN", "GLITTER", "LINES", "DOTS", "CLOUD", "BEAM", "RAYS", "HATCH", "VDASH", "GLOW", "HATCHBAND", "VDASHBAND", "VIGNETTE", "WEAVEBAND", "WEAVE" };
+const char* const PATTERN_NAMES[] = { "FLAT", "SHEEN", "GLITTER", "LINES", "DOTS", "CLOUD", "BEAM", "RAYS", "HATCH", "VDASH", "GLOW", "HATCHBAND", "VDASHBAND", "VIGNETTE", "WEAVEBAND", "WEAVE", "MOSAIC", "PRISM", "OUTLINE", "FULLART" };
 const char* const REGION_NAMES[] = { "CARD", "ART", "NAME", "BORDER" };
 const char* const RARITY_IDS[] = { "NORMAL", "SR", "UR", "SCR", "GR", "PR", "GST", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8" };
 
@@ -1060,12 +1088,14 @@ void RarityFx::CheckReload(uint32_t now_ms) {
 }
 
 void RarityFx::ReleaseTextures() {
+	ReleaseReliefs(nullptr); //(the driver and its textures are gone)
+	ReleaseFullArts(nullptr);
 	for(auto& t : patterns)
 		t = nullptr;
 	patterns_driver = nullptr;
 }
 
-void RarityFx::Draw2D(video::IVideoDriver* driver, const core::recti& card, Rarity rarity, uint32_t time_ms, const core::recti* clip, bool rotated) {
+void RarityFx::Draw2D(video::IVideoDriver* driver, const core::recti& card, Rarity rarity, uint32_t time_ms, const core::recti* clip, bool rotated, uint32_t code) {
 	if(rarity == Rarity::NORMAL)
 		return;
 	const int w = card.getWidth(), h = card.getHeight();
@@ -1080,6 +1110,45 @@ void RarityFx::Draw2D(video::IVideoDriver* driver, const core::recti& card, Rari
 	for(const auto& layer : LayersFor(rarity)) {
 		++layer_index;
 		const float depth = 0.15f + 0.12f * (layer_index % 4);
+		if(layer.pattern == Pattern::FULLART) {
+			//the card's picture enlarged over the whole card (the text box stays)
+			if(rotated || !code || w < 40)
+				continue;
+			auto* texture = FullArtFor(driver, code, time_ms);
+			if(!texture)
+				continue;
+			const video::SColor color(LayerColor(layer, seconds));
+			const video::SColor colors[4] = { color, color, color, color };
+			const auto size = texture->getOriginalSize();
+			driver->draw2DImage(texture, card, core::recti(0, 0, size.Width, size.Height), clip, colors, true);
+			continue;
+		}
+		if(layer.pattern == Pattern::OUTLINE) {
+			//the embossed relief of this card's picture, lit by a light that turns (or, under the mouse, comes from the side of the mouse)
+			if(rotated || !code || w < 40)
+				continue;
+			const auto* relief = ReliefFor(driver, code, time_ms);
+			if(!relief)
+				continue;
+			const auto strip = *RegionStrips(Region::ART).begin();
+			const core::recti area(card.UpperLeftCorner.X + static_cast<int>(w * strip[0]), card.UpperLeftCorner.Y + static_cast<int>(h * strip[2]),
+								   card.UpperLeftCorner.X + static_cast<int>(w * strip[1]), card.UpperLeftCorner.Y + static_cast<int>(h * strip[3]));
+			const float turns = hovered ? std::atan2(tilt_y, tilt_x) / 6.2831853f : static_cast<float>(seconds * layer.vx);
+			const float position = (turns - std::floor(turns)) * 8.0f;
+			const int first = static_cast<int>(position) % 8;
+			const float fraction = position - std::floor(position);
+			const uint32_t base_color = LayerColor(layer, seconds);
+			for(int k = 0; k < 2; ++k) {
+				const float weight = k == 0 ? 1.0f - fraction : fraction;
+				auto* texture = relief->direction[(first + k) % 8];
+				if(weight <= 0.004f || !texture)
+					continue;
+				const video::SColor color(ScaleAlpha(base_color, static_cast<uint32_t>(weight * 255)));
+				const video::SColor colors[4] = { color, color, color, color };
+				driver->draw2DImage(texture, area, core::recti(0, 0, RELIEF_SIZE, RELIEF_SIZE), clip, colors, true);
+			}
+			continue;
+		}
 		if(layer.region == Region::BORDER && layer.pattern != Pattern::FLAT && !rotated) {
 			//the frame as one band: the pattern runs clockwise along the top, the right side, the bottom and the left side
 			//and round the corners without a break (the four strips only share one phase along the way)
@@ -1254,12 +1323,67 @@ void RarityFx::DrawSummonShine(video::IVideoDriver* driver, const core::recti& c
 	}
 }
 
-void RarityFx::Draw3D(video::IVideoDriver* driver, const video::SMaterial& base, Rarity rarity, uint32_t time_ms, uint32_t alpha) {
+void RarityFx::Draw3D(video::IVideoDriver* driver, const video::SMaterial& base, Rarity rarity, uint32_t time_ms, uint32_t alpha, uint32_t code) {
 	if(rarity == Rarity::NORMAL || alpha == 0)
 		return;
 	static const u16 indices[6] = { 0, 1, 2, 2, 1, 3 };
 	const double seconds = time_ms / 1000.0 * SPEED;
 	for(const auto& layer : LayersFor(rarity)) {
+		if(layer.pattern == Pattern::FULLART) {
+			//the card's picture enlarged over the whole card (the text box stays)
+			if(!code)
+				continue;
+			auto* texture = FullArtFor(driver, code, time_ms);
+			if(!texture)
+				continue;
+			video::SMaterial material = base;
+			material.setTexture(0, texture);
+			const video::SColor color(ScaleAlpha(LayerColor(layer, seconds), alpha));
+			const float z = 0.003f;
+			video::S3DVertex v[4] = {
+				video::S3DVertex(-0.35f, -0.5f, z, 0, 0, 1, color, 0.0f, 0.0f),
+				video::S3DVertex(0.35f, -0.5f, z, 0, 0, 1, color, 1.0f, 0.0f),
+				video::S3DVertex(-0.35f, 0.5f, z, 0, 0, 1, color, 0.0f, 1.0f),
+				video::S3DVertex(0.35f, 0.5f, z, 0, 0, 1, color, 1.0f, 1.0f),
+			};
+			driver->setMaterial(material);
+			driver->drawVertexPrimitiveList(v, 4, indices, 2);
+			continue;
+		}
+		if(layer.pattern == Pattern::OUTLINE) {
+			//the embossed relief of this card's picture, lit from a direction that turns slowly
+			if(!code)
+				continue;
+			const auto* relief = ReliefFor(driver, code, time_ms);
+			if(!relief)
+				continue;
+			const auto strip = *RegionStrips(Region::ART).begin();
+			const float x0 = -0.35f + strip[0] * 0.7f, x1 = -0.35f + strip[1] * 0.7f;
+			const float y0 = -0.5f + strip[2], y1 = -0.5f + strip[3];
+			const float turns = static_cast<float>(seconds * layer.vx);
+			const float position = (turns - std::floor(turns)) * 8.0f;
+			const int first = static_cast<int>(position) % 8;
+			const float fraction = position - std::floor(position);
+			for(int k = 0; k < 2; ++k) {
+				const float weight = k == 0 ? 1.0f - fraction : fraction;
+				auto* texture = relief->direction[(first + k) % 8];
+				if(weight <= 0.004f || !texture)
+					continue;
+				video::SMaterial material = base;
+				material.setTexture(0, texture);
+				const video::SColor color(ScaleAlpha(LayerColor(layer, seconds), static_cast<uint32_t>(alpha * weight)));
+				const float z = 0.004f;
+				video::S3DVertex v[4] = {
+					video::S3DVertex(x0, y0, z, 0, 0, 1, color, 0.0f, 0.0f),
+					video::S3DVertex(x1, y0, z, 0, 0, 1, color, 1.0f, 0.0f),
+					video::S3DVertex(x0, y1, z, 0, 0, 1, color, 0.0f, 1.0f),
+					video::S3DVertex(x1, y1, z, 0, 0, 1, color, 1.0f, 1.0f),
+				};
+				driver->setMaterial(material);
+				driver->drawVertexPrimitiveList(v, 4, indices, 2);
+			}
+			continue;
+		}
 		auto* texture = GetPattern(driver, layer.pattern);
 		if(!texture)
 			continue;

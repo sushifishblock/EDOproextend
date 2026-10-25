@@ -50,6 +50,10 @@ PATTERNS = [
     ("SHEEN", "Soft sheen", "A broad soft shine."),
     ("LINES", "Lines", "Plain parallel lines."),
     ("DOTS", "Dots", "A grid of dots."),
+    ("MOSAIC", "Prism mosaic", "A fine grid of tiny colored squares that twinkle (the Starlight / Quarter Century texture)."),
+    ("PRISM", "Rainbow wash", "A soft rainbow flowing diagonally across the area."),
+    ("FULLART", "Full art", "The card's picture enlarged over the whole card, behind the name and the stars (Full Art Rare). Put it first, other layers go on top of it."),
+    ("OUTLINE", "Picture relief", "The outlines of each card's picture raised like embossing, lit by a turning light (Ultimate Rare). Speed = how fast the light turns."),
     ("VDASH", "Vertical dashes", "Short vertical dashes."),
     ("VDASHBAND", "Dashes in a band", "Vertical dashes only inside a band."),
 ]
@@ -95,6 +99,33 @@ def drift(center, amp, rate, sat=0.5):
 
 # Ready-made foils. They only use what the game can draw; nothing here is added anywhere until you add it yourself.
 PRESETS = [
+    ("Full Art Rare (full art)", "The card's picture is enlarged over the whole card, behind the name and the stars; only the text box stays. A soft sheen and glitter run over it. The picture is made from every card you view with it.", [
+        L("FULLART", "CARD", "FFFFFFFF", 1.0, 0.0, 0.0),
+        L("BEAM", "CARD", "50FFFFFF", 2.2, 0.18, 0.0),
+        L("GLITTER", "ART", "70FFFFFF", 0.8, 0.02, -0.04),
+        L("BEAM", "BORDER", "80FFFFFF", 1.0, 0.3, 0.0),
+    ]),
+    ("Ultimate Rare (relief)", "The outlines of each card's picture are raised like embossing: a turning light makes the edges flash silver, pink and cyan (under the mouse the light comes from the mouse). The relief is traced from the picture of every card you view with it.", [
+        L("OUTLINE", "ART", "E0FFFFFF", 1.0, 0.09, 0.0),
+        L("OUTLINE", "ART", "50FFFFFF", 1.0, -0.05, 0.0),
+        L("FLAT", "ART", "10C8D8FF", 1.0),
+        L("MOSAIC", "BORDER", "A0E0E8FF", 0.5, 0.04, 0.0),
+        L("BEAM", "BORDER", "80FFFFFF", 1.0, 0.3, 0.0),
+    ]),
+    ("Starlight Rare (prism)", "The Starlight / Quarter Century look: a fine rainbow mosaic over the picture, name and frame, a rainbow wash, twinkling stars and a running rainbow light on the frame.", [
+        L("PRISM", "ART", "40FFFFFF", 1.6, 0.04, 0.02),
+        L("PRISM", "BORDER", "B0FFFFFF", 0.9, 0.05, 0.0),
+        L("MOSAIC", "CARD", "38FFFFFF", 0.42, 0.01, 0.01),
+        L("MOSAIC", "ART", "B0FFFFFF", 0.42, 0.015, -0.01),
+        L("MOSAIC", "ART", "60FFFFFF", 0.8, -0.02, 0.012),
+        L("MOSAIC", "NAME", "80FFFFFF", 0.42, 0.02, 0.0),
+        L("BEAM", "ART", "50FFFFFF", 2.4, 0.14, 0.0, **rainbow(0.1, 0.55)),
+        L("GLITTER", "ART", "C8FFFFFF", 0.5, 0.01, -0.03),
+        L("GLITTER", "NAME", "80FFFFFF", 0.7, -0.01, 0.0),
+        L("VIGNETTE", "ART", "48C8D8FF", 0.77, 0.0, 0.0, pulse_amp=0.35, pulse_rate=0.3),
+        L("MOSAIC", "BORDER", "E0FFFFFF", 0.5, 0.06, 0.0),
+        L("BEAM", "BORDER", "A0FFFFFF", 1.0, 0.35, 0.0, **rainbow(0.3, 0.5)),
+    ]),
     ("Holo Dash (the example foil)", "Fine vertical rainbow dashes over the whole card, sweeping dash bands, a pastel glow, sparkles and a soft rainbow frame.", [
         L("VDASH", "CARD", "38FFFFFF", 0.30, 0.02, 0.0),
         L("VDASHBAND", "CARD", "A8FFFFFF", 1.0, 0.12, 0.0),

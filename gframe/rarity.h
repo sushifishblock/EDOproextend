@@ -44,9 +44,9 @@ public:
 	//the rarity files were replaced (a rarity pack was installed): read them again
 	static void ReloadFiles();
 	//2D: the effect over a card picture drawn in `card` (browser grid, card preview)
-	static void Draw2D(irr::video::IVideoDriver* driver, const irr::core::recti& card, Rarity rarity, uint32_t time_ms, const irr::core::recti* clip, bool rotated = false);
+	static void Draw2D(irr::video::IVideoDriver* driver, const irr::core::recti& card, Rarity rarity, uint32_t time_ms, const irr::core::recti* clip, bool rotated = false, uint32_t code = 0);
 	//3D: the effect over the front of a card in a duel; `world` is the card's transform (already set), alpha 0-255
-	static void Draw3D(irr::video::IVideoDriver* driver, const irr::video::SMaterial& base, Rarity rarity, uint32_t time_ms, uint32_t alpha);
+	static void Draw3D(irr::video::IVideoDriver* driver, const irr::video::SMaterial& base, Rarity rarity, uint32_t time_ms, uint32_t alpha, uint32_t code = 0);
 	//the textures are rebuilt after the driver was reset
 	static void ReleaseTextures();
 	//the mouse position (screen pixels), updated every frame: foils over the card under the mouse shift with it and get a glint

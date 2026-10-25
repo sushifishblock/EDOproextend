@@ -166,6 +166,20 @@ def make_pattern(name):
         return _weave(100.0)
     if name == "WEAVE":
         return _weave(0)
+    if name == "MOSAIC":
+        cx, cy = X // 4, Y // 4
+        r = np.vectorize(lambda i: _hash(int(i)))(cy * 64 + cx + 12345).astype(np.uint32)
+        b = (r & 255) / 255.0
+        jitter = ((r >> 8) & 255) / 255.0
+        hue = ((cx + cy) % 32) / 32.0 + jitter * 0.3
+        rgb, _ = hsv_arrays(hue.astype(np.float32), 0.75, 1.0)
+        inside = ((X % 4) <= 2) & ((Y % 4) <= 2)
+        return rgb, np.where(inside, b * b * b, 0.0).astype(np.float32)
+    if name == "PRISM":
+        hue = 2.0 * ((X + Y) % SIZE) / SIZE
+        rgb, _ = hsv_arrays(hue.astype(np.float32), 0.65, 1.0)
+        a = 0.75 + 0.25 * np.sin(2 * math.pi * (((X - Y) % SIZE + SIZE) % SIZE) / SIZE)
+        return rgb, a.astype(np.float32)
     return _white(np.zeros((SIZE, SIZE)))
 
 
@@ -263,6 +277,161 @@ def _border_layer(out, layer, colour, alpha, seconds):
         out[y0:y1, x0:x1] = tex_rgb * np.array(colour, np.float32) * tex_a + region * (1 - tex_a)
 
 
+# ---------------------------------------------------------------- relief
+RELIEF_SIZE = 128
+_relief_cache = {}
+
+
+def _box_blur(a, r=1):
+    k = 2 * r + 1
+    p = np.pad(a, r, mode="edge")
+    out = np.zeros_like(a)
+    for dy in range(k):
+        for dx in range(k):
+            out += p[dy:dy + a.shape[0], dx:dx + a.shape[1]]
+    return out / (k * k)
+
+
+def relief_of(base):
+    """The embossed outline of the picture of a card (gradients of a terraced height map), like the game's. Built once per picture."""
+    h, w = base.shape[:2]
+    x0, x1, y0, y1 = ART
+    art = Image.fromarray((np.clip(base[int(h * y0):int(h * y1), int(w * x0):int(w * x1)], 0, 1) * 255).astype(np.uint8), "RGB")
+    art = np.asarray(art.resize((RELIEF_SIZE, RELIEF_SIZE), Image.BOX), np.float32) / 255.0
+    luma = art[..., 0] * 0.299 + art[..., 1] * 0.587 + art[..., 2] * 0.114
+    luma = _box_blur(_box_blur(luma))
+    levels = 6
+    x = luma * levels
+    k = np.floor(x)
+    f = np.clip((x - k - 0.30) / 0.40, 0, 1)
+    s = f * f * (3 - 2 * f)
+    height = 0.8 * (k + s) / levels + 0.2 * luma
+    height = _box_blur(height)
+    gy, gx = np.gradient(height)
+    return gx.astype(np.float32), gy.astype(np.float32)
+
+
+def relief_shade(relief, angle):
+    """RGBA (0..1) of the relief lit from `angle`: bright rims facing the light (tinted by their direction), dark rims away from it."""
+    gx, gy = relief
+    d = gx * math.cos(angle) + gy * math.sin(angle)
+    lit = np.clip(d * RELIEF_GAIN, 0, 1)
+    shadow = np.clip(-d * RELIEF_GAIN * 0.55, 0, 0.7)
+    hue = (np.arctan2(gy, gx) / (2 * math.pi) + 0.5).astype(np.float32)
+    rgb, _ = hsv_arrays(hue, 0.45, 1.0)
+    rgb = rgb * 0.6 + 0.4
+    noise = (np.vectorize(lambda i: _hash(int(i)))(Y[:RELIEF_SIZE, :RELIEF_SIZE] * RELIEF_SIZE + X[:RELIEF_SIZE, :RELIEF_SIZE] + 777) & 255) / 255.0
+    lit = lit * (0.7 + 0.3 * noise)
+    out_rgb = np.where((lit > shadow)[..., None], rgb, 0.0)
+    out_a = np.where(lit > shadow, lit, shadow)
+    return out_rgb.astype(np.float32), out_a.astype(np.float32)
+
+
+RELIEF_GAIN = 9.0
+
+
+def draw_relief(out, layer, colour, alpha, seconds, relief):
+    h, w = out.shape[:2]
+    x0, x1, y0, y1 = ART
+    ax0, ax1, ay0, ay1 = int(w * x0), int(w * x1), int(h * y0), int(h * y1)
+    aw, ah = ax1 - ax0, ay1 - ay0
+    angle = seconds * layer["vx"] * 2 * math.pi
+    pos = (angle / (2 * math.pi) % 1.0) * 8
+    i0 = int(pos) % 8
+    frac = pos - int(pos)
+    for index, weight in ((i0, 1 - frac), ((i0 + 1) % 8, frac)):
+        if weight <= 0.001:
+            continue
+        rgb, a = relief_shade(relief, index * math.pi / 4)
+        rgb_img = Image.fromarray((np.clip(np.concatenate([rgb, a[..., None]], axis=-1), 0, 1) * 255).astype(np.uint8), "RGBA").resize((aw, ah), Image.BILINEAR)
+        arr = np.asarray(rgb_img, np.float32) / 255.0
+        ea = (arr[..., 3] * alpha * weight)[..., None]
+        region = out[ay0:ay1, ax0:ax1]
+        out[ay0:ay1, ax0:ax1] = arr[..., :3] * np.array(colour, np.float32) * ea + region * (1 - ea)
+
+
+_fullart_cache = {}
+
+
+def _box3(a):
+    p = np.pad(a, 1, mode="edge")
+    return sum(p[j:j + a.shape[0], i:i + a.shape[1]] for j in range(3) for i in range(3)) / 9.0
+
+
+def _grow(mask, steps):
+    for _ in range(steps):
+        g = mask.copy()
+        g[1:] = np.maximum(g[1:], mask[:-1]); g[:-1] = np.maximum(g[:-1], mask[1:])
+        g[:, 1:] = np.maximum(g[:, 1:], mask[:, :-1]); g[:, :-1] = np.maximum(g[:, :-1], mask[:, 1:])
+        mask = g
+    return mask
+
+
+def _blur(a, passes):
+    for _ in range(passes):
+        a = _box3(a)
+    return a
+
+
+def _lift_letters(base, scale, x0, x1, y0, y1, leave_out=None):
+    """Letters printed on a plate, lifted off it: (alpha, glow, letter colour, glow colour), all as in gframe/fullart.cpp."""
+    h, w = base.shape[:2]
+    c, d, a, b = int(y0 * h), int(y1 * h), int(x0 * w), int(x1 * w)
+    luma = base[c:d, a:b] @ np.array([0.299, 0.587, 0.114], np.float32) * 255
+    plate = np.median(luma)
+    dark = (luma < plate - 45).sum() >= (luma > plate + 45).sum()
+    span = max(40.0, plate - 25 if dark else 240 - plate)
+    dev = plate - luma if dark else luma - plate
+    alpha = np.zeros((h, w), np.float32)
+    alpha[c:d, a:b] = np.clip((dev - 24) / (span - 24), 0, 1)
+    if leave_out is not None:
+        alpha *= 1 - leave_out
+    glow = _blur(_grow((alpha > 0.4).astype(np.float32), 2 * scale), 2 * scale)
+    glow = np.minimum(1.0, glow * 1.6) * 0.8
+    if dark:
+        return alpha, glow, np.array([30, 20, 15], np.float32) / 255, np.array([245, 235, 215], np.float32) / 255
+    return alpha, glow, np.full(3, 240 / 255, np.float32), np.array([25, 15, 40], np.float32) / 255
+
+
+def fullart_of(base):
+    """(the card with its picture enlarged over the whole card, how much of it shows): the same steps as gframe/fullart.cpp."""
+    h, w = base.shape[:2]
+    scale = max(1, round(w / 400))
+    x0, x1, y0, y1 = ART
+    ix, iy = (x1 - x0) * 0.02, (y1 - y0) * 0.02
+    crop = (base[int((y0 + iy) * h):int((y1 - iy) * h), int((x0 + ix) * w):int((x1 - ix) * w)] * 255).astype(np.uint8)
+    zh = int(0.743 * h)
+    side = max(zh, w)
+    art = np.asarray(Image.fromarray(crop).resize((side, zh), Image.LANCZOS), np.float32) / 255.0
+    cx = (side - w) // 2
+    picture = base.copy()
+    picture[:zh] = art[:, cx:cx + w]
+    # the level stars (round orbs), grown a little to take their rims
+    c, d, a, b = int(0.120 * h), int(0.165 * h), int(0.075 * w), int(0.94 * w)
+    reg = base[c:d, a:b] * 255
+    r, g, bl = reg[..., 0], reg[..., 1], reg[..., 2]
+    stars = np.zeros((h, w), np.float32)
+    # a star is a round orb: bright orange/yellow on the lit side, deep red on the other
+    stars[c:d, a:b] = ((r > 225) & (g > 120)) | ((r > 100) & (g < 0.45 * r) & (bl < 0.5 * r))
+    stars = _grow(stars, 2 * scale)
+    stars = _grow(1 - _grow(1 - stars, 7 * scale), 7 * scale)  # thin streaks of the same colours vanish, the round orbs stay
+    stars = 1 - _grow(1 - stars, 2 * scale)  # back to the orb's own edge
+    star_area = _grow(stars, 5 * scale)
+    ink = stars
+    # the attribute: its round badge only
+    yy, xx = np.mgrid[0:h, 0:w]
+    ink[((xx - 0.88 * w) ** 2 + (yy - 0.079 * h) ** 2) <= (0.048 * w) ** 2] = 1
+    smooth = _box3((_box3(ink) > 0.5).astype(np.float32))
+    for alpha, glow, colour, glow_colour in (_lift_letters(base, scale, 0.065, 0.82, 0.053, 0.104),
+                                             _lift_letters(base, scale, 0.075, 0.94, 0.130, 0.168, star_area)):
+        picture = (picture * (1 - glow[..., None]) + glow_colour * glow[..., None]) * (1 - alpha[..., None]) + colour * alpha[..., None]
+    shown = (1 - smooth)[..., None]
+    card = base * (1 - shown) + picture * shown
+    zone = np.zeros((h, w), np.float32)
+    zone[int(0.015 * h):zh, int(0.02 * w):int(0.98 * w)] = 1
+    return card, _box3(zone)
+
+
 def compose(base, layers, seconds):
     """Draw the layers over `base` (HxWx3 float 0..1) and return the new image."""
     out = base.copy()
@@ -272,6 +441,22 @@ def compose(base, layers, seconds):
             continue
         colour, alpha = layer_color(layer, seconds)
         if alpha <= 0.002:
+            continue
+        if layer["pattern"] == "FULLART":
+            key = id(base)
+            if key not in _fullart_cache:
+                _fullart_cache.clear()
+                _fullart_cache[key] = fullart_of(base)
+            full, zone = _fullart_cache[key]
+            m = (zone * alpha)[..., None]
+            out = full * m + out * (1 - m)
+            continue
+        if layer["pattern"] == "OUTLINE":
+            key = id(base)
+            if key not in _relief_cache:
+                _relief_cache.clear()
+                _relief_cache[key] = relief_of(base)
+            draw_relief(out, layer, colour, alpha, seconds, _relief_cache[key])
             continue
         if layer["region"] == "BORDER" and layer["pattern"] != "FLAT":
             _border_layer(out, layer, colour, alpha, seconds)
