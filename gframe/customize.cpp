@@ -288,9 +288,9 @@ struct Slot {
 Slot slots[3] = { { "sleeve.png", L"My sleeve", 480, 700, true }, { "sleeve_opponent.png", L"Opponent's sleeve", 480, 700, true }, { "playmat.png", L"Playmat", 1024, 820, false } };
 
 struct ArtUi {
-	gui::IGUIComboBox *slot = nullptr, *fit = nullptr;
+	gui::IGUIComboBox *slot = nullptr, *fit = nullptr, *foil = nullptr;
 	gui::IGUIScrollBar *zoom = nullptr, *x = nullptr, *y = nullptr, *bright = nullptr, *border = nullptr;
-	gui::IGUIStaticText *file_text = nullptr, *border_label = nullptr, *note = nullptr;
+	gui::IGUIStaticText *file_text = nullptr, *border_label = nullptr, *note = nullptr, *foil_label = nullptr;
 	gui::IGUIImage* preview = nullptr;
 	video::ITexture* preview_texture = nullptr;
 	int current = 0;
@@ -424,6 +424,23 @@ void ShowSlotWidgets() {
 	art_ui.border->setPos(static_cast<s32>(std::lround(slot.params.border * 1000)));
 	art_ui.border->setVisible(slot.sleeve);
 	art_ui.border_label->setVisible(slot.sleeve);
+	art_ui.foil->setVisible(slot.sleeve);
+	art_ui.foil_label->setVisible(slot.sleeve);
+	if(slot.sleeve) {
+		//the foils there are to pick from: the rarities that are made (this also follows the Studio's changes)
+		art_ui.foil->clear();
+		art_ui.foil->addItem(L"No foil", 0);
+		int selected = 0;
+		for(int i = 1; i < static_cast<int>(Rarity::COUNT); ++i) {
+			const auto rarity = static_cast<Rarity>(i);
+			if(!RarityFx::Defined(rarity))
+				continue;
+			if(RarityFx::SleeveFoil(art_ui.current) == rarity)
+				selected = static_cast<int>(art_ui.foil->getItemCount());
+			art_ui.foil->addItem(RarityFx::Name(rarity), i);
+		}
+		art_ui.foil->setSelected(selected);
+	}
 	art_ui.refreshing = false;
 	if(slot.path.empty())
 		art_ui.file_text->setText(L"No picture chosen: the game's own one is used.");
@@ -582,6 +599,8 @@ void Game::CreateCustomizeWindow() {
 	art_ui.bright = slider(L"Brightness", 200, SCROLL_ART_BRIGHT, 30, 150);
 	art_ui.border = slider(L"Black border", 228, SCROLL_ART_BORDER, 0, 60);
 	art_ui.border_label = env->addStaticText(L"", Scale(0, 0, 0, 0), false, false, art_tab);
+	art_ui.foil_label = env->addStaticText(L"Foil over the sleeve (a rarity of yours, shows in the next duel)", Scale(545, 82, 735, 118), false, true, art_tab);
+	art_ui.foil = env->addComboBox(Scale(545, 122, 735, 144), art_tab, COMBOBOX_ART_FOIL);
 	art_ui.preview = env->addImage(Scale(390, 80, 530, 284), art_tab, -1, nullptr, false);
 	art_ui.preview->setScaleImage(true);
 	art_ui.note = env->addStaticText(L"Pick a picture: it is cut to the right shape for you. You can also drag a picture file onto the game window. Sleeves are read when the game starts, the playmat shows up in the next duel. (png, jpg, bmp, tga)",
@@ -752,6 +771,10 @@ bool Game::OnCustomizeEvent(const irr::SEvent& event) {
 			EnsureLoaded(driver, slots[art_ui.current]);
 			ShowSlotWidgets();
 			RenderPreview(driver);
+			return true;
+		case COMBOBOX_ART_FOIL:
+			if(!art_ui.refreshing && art_ui.foil->getSelected() >= 0)
+				RarityFx::SetSleeveFoil(art_ui.current, static_cast<Rarity>(art_ui.foil->getItemData(art_ui.foil->getSelected())));
 			return true;
 		case COMBOBOX_ART_FIT:
 			if(!art_ui.refreshing) {

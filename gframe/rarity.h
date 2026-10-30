@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <deque>
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -22,8 +23,16 @@ enum class Rarity : uint8_t {
 	COUNT
 };
 
+//A friend's rarities (the rarity pack they published), used for their cards in a duel. Made by RarityFx::LoadProfile.
+struct RarityProfile;
+
 class RarityFx {
 public:
+	static std::shared_ptr<RarityProfile> LoadProfile(const std::string& pack_json); //nullptr if it is not a rarity pack
+	static Rarity ProfileGet(const RarityProfile& profile, uint32_t code); //the rarity the friend has given a card
+	static Rarity ProfileFoil(const RarityProfile& profile); //the foil over the friend's own sleeve
+	//the next Draw2D / Draw3D calls use the friend's designs for the rarities (nullptr: yours again)
+	static void UseProfile(const RarityProfile* profile);
 	static void Load();
 	static Rarity Get(uint32_t code);
 	static void Set(uint32_t code, Rarity rarity);
@@ -41,6 +50,9 @@ public:
 	static uint32_t DefsGeneration();
 	//call every frame: reloads custom_rarities.json when it changed (checked once a second)
 	static void CheckReload(uint32_t now_ms);
+	//a foil over the back of the cards: controler 0 = my sleeve, 1 = the opponent's (custom_art/foil.txt, read again when it changes)
+	static Rarity SleeveFoil(int controler) { return controler == 1 ? sleeve_foil[1] : sleeve_foil[0]; }
+	static void SetSleeveFoil(int controler, Rarity rarity);
 	//the rarity files were replaced (a rarity pack was installed): read them again
 	static void ReloadFiles();
 	//2D: the effect over a card picture drawn in `card` (browser grid, card preview)
@@ -94,6 +106,8 @@ private:
 	static inline std::map<uint32_t, std::deque<Rarity>> duel_pool;
 	static inline std::wstring duel_name;
 	static inline int mouse_x = -10000, mouse_y = -10000;
+	static inline Rarity sleeve_foil[2] = { Rarity::NORMAL, Rarity::NORMAL };
+	static void ReadSleeveFoil();
 	static void Save();
 	static void ReadAssignments();
 	static Rarity RuleRarity(uint32_t code);

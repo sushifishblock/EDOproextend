@@ -73,6 +73,38 @@ def collect_art(folder):
     return art
 
 
+def collect_foil(folder):
+    """The foil over the sleeves (custom_art/foil.txt) as {"mine": id, "opponent": id}, ids like "UR" or "C3" ("" = none)."""
+    foil = {"mine": "", "opponent": ""}
+    try:
+        with open(os.path.join(folder, "custom_art", "foil.txt"), "r", encoding="utf-8") as f:
+            for line in f:
+                key, _, value = line.strip().partition("=")
+                if key in foil:
+                    foil[key] = value
+    except OSError:
+        pass
+    return foil
+
+
+def profile_id(folder):
+    """Who the pack is from: the number in profile.id (1-255), made when there is none. The game hides it in the player name in duels,
+    so friends who have this pack show your rarities on your cards."""
+    path = os.path.join(folder, "profile.id")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            value = int(f.read().strip())
+        if 1 <= value <= 255:
+            return value
+    except (OSError, ValueError):
+        pass
+    import random
+    value = random.randint(1, 255)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(str(value))
+    return value
+
+
 class ArtPanel(ttk.Frame):
     def __init__(self, parent, window, slot_key, Slider):
         super().__init__(parent, padding=10)

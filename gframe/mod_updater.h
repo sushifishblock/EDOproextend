@@ -6,7 +6,7 @@
 #include <string>
 
 //the Studio reads this text from the exe when it publishes a build for friends
-#define MOD_VERSION_STRING "1.8.7"
+#define MOD_VERSION_STRING "1.8.8"
 
 namespace ygo {
 

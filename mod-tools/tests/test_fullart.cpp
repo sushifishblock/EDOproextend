@@ -44,6 +44,13 @@ int main() {
 	//the text box and the card's outer edge are not changed
 	CHECK(px(200, 500)[3] == 0);
 	CHECK(px(0, 0)[3] == 0);
+	//the same picture at power-of-two sides: the colors stay and the untouched part stays transparent
+	const RgbaImage big = ResizeRgba(out, 512, 1024);
+	CHECK(big.width == 512 && big.height == 1024 && big.rgba.size() == static_cast<size_t>(512) * 1024 * 4);
+	const uint8_t* big_side = &big.rgba[(static_cast<size_t>(1024 * 0.5) * 512 + static_cast<size_t>(512 * 0.06)) * 4];
+	CHECK(big_side[2] > 150 && big_side[0] < 80 && big_side[3] == 255);
+	CHECK(big.rgba[(static_cast<size_t>(1024 * 0.9) * 512 + 256) * 4 + 3] == 0);
+	CHECK(ResizeRgba(RgbaImage(), 64, 64).Empty());
 	if(!failures)
 		std::printf("ALL OK\n");
 	return failures ? 1 : 0;

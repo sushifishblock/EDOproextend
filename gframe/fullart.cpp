@@ -218,6 +218,82 @@ Letters LiftLetters(const Pixels& card, int rows, float x0, float x1, float y0, 
 }
 }
 
+RgbaImage ResizeRgba(const RgbaImage& image, int width, int height) {
+	RgbaImage out;
+	if(image.Empty() || width < 1 || height < 1)
+		return out;
+	out.width = width;
+	out.height = height;
+	out.rgba.resize(static_cast<size_t>(width) * height * 4);
+	const float scale_x = static_cast<float>(image.width) / width, scale_y = static_cast<float>(image.height) / height;
+	//each new pixel averages a few samples spread over the part of the old picture it covers (colors weighted by their alpha)
+	const int nx = std::clamp(static_cast<int>(std::ceil(scale_x)), 1, 4), ny = std::clamp(static_cast<int>(std::ceil(scale_y)), 1, 4);
+	for(int y = 0; y < height; ++y) {
+		for(int x = 0; x < width; ++x) {
+			float sum[4] = { 0, 0, 0, 0 };
+			for(int j = 0; j < ny; ++j) {
+				for(int i = 0; i < nx; ++i) {
+					const float sx = std::clamp((x + (i + 0.5f) / nx) * scale_x - 0.5f, 0.0f, static_cast<float>(image.width - 1));
+					const float sy = std::clamp((y + (j + 0.5f) / ny) * scale_y - 0.5f, 0.0f, static_cast<float>(image.height - 1));
+					const int x0 = static_cast<int>(sx), y0 = static_cast<int>(sy);
+					const int x1 = std::min(x0 + 1, image.width - 1), y1 = std::min(y0 + 1, image.height - 1);
+					const float fx = sx - x0, fy = sy - y0;
+					const auto at = [&](int px, int py, int k) { return static_cast<float>(image.rgba[(static_cast<size_t>(py) * image.width + px) * 4 + k]); };
+					const float weights[4] = { (1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy };
+					const int xs[4] = { x0, x1, x0, x1 }, ys[4] = { y0, y0, y1, y1 };
+					for(int k = 0; k < 4; ++k) {
+						const float w = weights[k];
+						const float a = at(xs[k], ys[k], 3);
+						sum[0] += w * a * at(xs[k], ys[k], 0); sum[1] += w * a * at(xs[k], ys[k], 1); sum[2] += w * a * at(xs[k], ys[k], 2); sum[3] += w * a;
+					}
+				}
+			}
+			uint8_t* o = &out.rgba[(static_cast<size_t>(y) * width + x) * 4];
+			const float count = static_cast<float>(nx * ny);
+			if(sum[3] > 0.0f) {
+				for(int k = 0; k < 3; ++k)
+					o[k] = static_cast<uint8_t>(std::clamp(sum[k] / sum[3], 0.0f, 255.0f) + 0.5f);
+			} else {
+				o[0] = o[1] = o[2] = 0;
+			}
+			o[3] = static_cast<uint8_t>(std::clamp(sum[3] / count, 0.0f, 255.0f) + 0.5f);
+		}
+	}
+	return out;
+}
+
+void SharpenRgba(RgbaImage& image, int radius, float amount) {
+	if(image.Empty() || radius < 1 || amount <= 0.0f)
+		return;
+	const int w = image.width, h = image.height;
+	const size_t count = static_cast<size_t>(w) * h;
+	//a blurred copy: a box blur along rows then columns (running sums), for each of the three colors
+	std::vector<float> blurred(count * 3);
+	std::vector<float> line(static_cast<size_t>(std::max(w, h)) + 2 * radius + 1);
+	const auto box = [&](int length, size_t start, size_t step, auto get, auto put) {
+		//edge pixels repeat outwards
+		float sum = 0;
+		for(int i = -radius; i <= radius; ++i)
+			sum += get(start + step * std::clamp(i, 0, length - 1));
+		for(int i = 0; i < length; ++i) {
+			put(start + step * i, sum / (2 * radius + 1));
+			sum += get(start + step * std::clamp(i + radius + 1, 0, length - 1)) - get(start + step * std::clamp(i - radius, 0, length - 1));
+		}
+	};
+	std::vector<float> rows(count);
+	for(int k = 0; k < 3; ++k) {
+		for(int y = 0; y < h; ++y)
+			box(w, static_cast<size_t>(y) * w, 1, [&](size_t at) { return static_cast<float>(image.rgba[at * 4 + k]); }, [&](size_t at, float v) { rows[at] = v; });
+		for(int x = 0; x < w; ++x)
+			box(h, static_cast<size_t>(x), static_cast<size_t>(w), [&](size_t at) { return rows[at]; }, [&](size_t at, float v) { blurred[at * 3 + k] = v; });
+	}
+	for(size_t i = 0; i < count; ++i)
+		for(int k = 0; k < 3; ++k) {
+			const float c = image.rgba[i * 4 + k];
+			image.rgba[i * 4 + k] = static_cast<uint8_t>(std::clamp(c + amount * (c - blurred[i * 3 + k]), 0.0f, 255.0f) + 0.5f);
+		}
+}
+
 RgbaImage MakeFullArt(const RgbImage& card, int out_width) {
 	RgbaImage result;
 	if(card.width < 48 || card.height < 64 || card.rgb.size() < static_cast<size_t>(card.width) * card.height * 3 || out_width < 48)

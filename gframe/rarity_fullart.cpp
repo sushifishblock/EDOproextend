@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <filesystem>
+#include <fstream>
 #include <IImage.h>
 #include <IReadFile.h>
 #include "fmt.h"
@@ -18,7 +19,7 @@ namespace ygo {
 namespace {
 using namespace irr;
 
-constexpr size_t MAX_CARDS = 24;
+constexpr size_t MAX_CARDS = 16;
 constexpr int MAX_WIDTH = 1024; //the card's own resolution, up to this
 
 struct Entry {
@@ -96,10 +97,21 @@ bool ReadRgb(video::IImage* image, RgbImage& out) {
 }
 
 //card: the card's picture; from_file: it came from the picture file at full size
+int NearestPowerOfTwo(int value) {
+	int low = 64;
+	while(low * 2 <= value && low < MAX_WIDTH * 2)
+		low *= 2;
+	return (value - low) < (low * 2 - value) ? low : std::min(low * 2, 1024);
+}
+
 void Build(video::IVideoDriver* driver, uint32_t code, Entry& entry, const RgbImage& card, bool from_file) {
-	const RgbaImage made = MakeFullArt(card, std::min(card.width, MAX_WIDTH));
+	RgbaImage made = MakeFullArt(card, std::min(card.width, MAX_WIDTH));
 	if(made.Empty())
 		return;
+	//the video card needs sides that are powers of two to make the smaller copies (mipmaps) that keep the picture sharp when the card is small
+	made = ResizeRgba(made, NearestPowerOfTwo(made.width), NearestPowerOfTwo(made.height));
+	//the card is shown far smaller than the picture: a little more contrast in its detail keeps it from looking soft when shrunk
+	SharpenRgba(made, std::max(2, made.width / 100), 0.8f);
 	auto* image = driver->createImage(video::ECF_A8R8G8B8, core::dimension2d<u32>(made.width, made.height));
 	if(!image)
 		return;
@@ -119,6 +131,13 @@ void Build(video::IVideoDriver* driver, uint32_t code, Entry& entry, const RgbIm
 	Free(driver, entry);
 	entry.texture = texture;
 	entry.original = from_file;
+	//a line per picture made, to see where it came from and how big it really is
+	static int logged = 0;
+	if(logged++ < 200) {
+		const auto actual = texture->getSize();
+		std::ofstream("fullart_log.txt", std::ios::app) << code << (from_file ? " file " : " texture ") << card.width << "x" << card.height << " -> made " << made.width << "x" << made.height
+			<< ", video card has " << actual.Width << "x" << actual.Height << (driver->getTextureCreationFlag(video::ETCF_CREATE_MIP_MAPS) ? "" : "") << ", max " << driver->getMaxTextureSize().Width << '\n';
+	}
 }
 
 void Trim(video::IVideoDriver* driver) {

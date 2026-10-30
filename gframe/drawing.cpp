@@ -16,6 +16,7 @@
 #include "custom_skin_enum.h"
 #include "image_manager.h"
 #include "fmt.h"
+#include "profiles.h"
 
 namespace ygo {
 void Game::DrawSelectionLine(const Materials::QuadVertex vec, bool strip, int width, irr::video::SColor color) {
@@ -424,6 +425,15 @@ void Game::DrawCard(ClientCard* pcard) {
 				if(age >= 0 && age < 1000)
 					RarityFx::DrawShine3D(driver, matManager.mRarity, age / 1000.0f, alpha);
 			}
+		} else if(pcard->code && pcard->controler == 1) {
+			//a friend with the mod: their cards show the rarities they gave them (their designs, from their rarity pack)
+			if(const auto profile = Profiles::Opponent()) {
+				if(const auto rarity = RarityFx::ProfileGet(*profile, pcard->code); rarity != Rarity::NORMAL) {
+					RarityFx::UseProfile(profile.get());
+					RarityFx::Draw3D(driver, matManager.mRarity, rarity, device->getTimer()->getTime(), static_cast<uint32_t>(std::clamp(std::round(pcard->curAlpha), 0.0f, 255.0f)), pcard->code);
+					RarityFx::UseProfile(nullptr);
+				}
+			}
 		}
 	}
 	if(m22 < 0.99 || pcard->is_moving) {
@@ -435,6 +445,23 @@ void Game::DrawCard(ClientCard* pcard) {
 		}
 		driver->setMaterial(matManager.mCard);
 		driver->drawVertexPrimitiveList(matManager.vCardBack, 4, matManager.iRectangle, 2);
+		//a foil over the sleeve: the foil layers are drawn with the card turned round, so they face whoever sees the back
+		if(txt == imageManager.tCover[0] && (pcard->controler == 0 || pcard->controler == 1)) {
+			//the foil I chose for the sleeve; the opponent's sleeve shows the foil its owner chose when I have their profile
+			auto foil = RarityFx::SleeveFoil(pcard->controler);
+			std::shared_ptr<RarityProfile> profile;
+			if(pcard->controler == 1 && (profile = Profiles::Opponent()))
+				foil = RarityFx::ProfileFoil(*profile);
+			if(foil != Rarity::NORMAL) {
+				irr::core::matrix4 turned;
+				turned.setRotationDegrees(irr::core::vector3df(0, 180, 0));
+				driver->setTransform(irr::video::ETS_WORLD, pcard->mTransform * turned);
+				RarityFx::UseProfile(profile.get());
+				RarityFx::Draw3D(driver, matManager.mRarity, foil, device->getTimer()->getTime(), static_cast<uint32_t>(std::clamp(std::round(pcard->curAlpha), 0.0f, 255.0f)));
+				RarityFx::UseProfile(nullptr);
+				driver->setTransform(irr::video::ETS_WORLD, pcard->mTransform);
+			}
+		}
 	}
 	if(pcard->is_selectable && (pcard->location & 0xe)) {
 		irr::video::SColor outline_color = skin::DUELFIELD_SELECTABLE_CARD_OUTLINE_VAL;

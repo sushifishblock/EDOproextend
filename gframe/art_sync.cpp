@@ -184,7 +184,8 @@ void ArtSync::RunInner() {
 		while(active.size() < PARALLEL && !waiting.empty() && clock::now() >= next_start) {
 			auto* transfer = waiting.front();
 			waiting.pop_front();
-			next_start = std::max(clock::now(), next_start) + interval;
+			//the start times keep their rhythm, but may fall a few behind: after a wait several transfers are started at once (one per pass of the loop was far below the rate)
+			next_start = std::max(next_start, clock::now() - 32 * interval) + interval;
 			if(!transfer->easy) {
 				transfer->easy = curl_easy_init();
 				if(!transfer->easy) {
@@ -305,6 +306,11 @@ void ArtSync::RunInner() {
 			std::this_thread::sleep_for(std::chrono::milliseconds(20)); //only waiting for retries: do not spin
 	}
 	flush_lists();
+	if(downloaded.load() > 0) {
+		const double seconds = ElapsedSeconds();
+		std::ofstream("cardcache/art_sync_log.txt", std::ios::app) << downloaded.load() << " pictures (" << bytes.load() / (1024 * 1024) << " MB) in " << static_cast<int>(seconds) << " s = "
+			<< static_cast<int>(bytes.load() / 1048576.0 / std::max(seconds, 1.0) * 10) / 10.0 << " MB/s, not on the server " << missing.load() << ", failed " << failed.load() << '\n';
+	}
 	for(auto& entry : active)
 		curl_multi_remove_handle(multi, entry.first);
 	for(auto& transfer : storage) {

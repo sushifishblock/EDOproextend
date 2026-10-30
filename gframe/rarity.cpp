@@ -525,6 +525,18 @@ struct CustomDef {
 	std::vector<Layer> layers;
 };
 CustomDef custom_defs[static_cast<int>(Rarity::COUNT)];
+}
+
+struct RarityProfile {
+	CustomDef defs[static_cast<int>(Rarity::COUNT)];
+	std::unordered_map<uint32_t, Rarity> chosen;
+	std::vector<RarityRule> rules;
+	std::unordered_map<uint32_t, uint8_t> rule_cache;
+	Rarity foil = Rarity::NORMAL;
+};
+
+namespace {
+const RarityProfile* active_profile = nullptr; //a friend's designs are in use (see RarityFx::UseProfile)
 uint32_t defs_generation = 0;
 bool layer_cache_built[static_cast<int>(Rarity::COUNT)] = {};
 std::vector<Layer> layer_cache[static_cast<int>(Rarity::COUNT)];
@@ -536,8 +548,9 @@ const char* const RARITY_IDS[] = { "NORMAL", "SR", "UR", "SCR", "GR", "PR", "GST
 //the layers of a rarity: a custom definition if there is one, else built once
 const std::vector<Layer>& LayersFor(Rarity rarity) {
 	const int index = static_cast<int>(rarity);
-	if(custom_defs[index].defined)
-		return custom_defs[index].layers;
+	const CustomDef& def = active_profile ? active_profile->defs[index] : custom_defs[index];
+	if(def.defined)
+		return def.layers;
 	if(rarity >= Rarity::C1) {
 		static const std::vector<Layer> none;
 		return none;
@@ -655,13 +668,8 @@ void ExportBuiltin() {
 	} catch(...) {}
 }
 
-bool LoadCustomFile() {
-	try {
-		std::ifstream file("custom_rarities.json", std::ios::binary);
-		if(!file.is_open())
-			return false;
-		const auto root = nlohmann::json::parse(file);
-		CustomDef fresh[static_cast<int>(Rarity::COUNT)];
+//the rarities of a custom_rarities.json (or of the same part of a rarity pack); throws when it is broken
+void ParseDefs(const nlohmann::json& root, CustomDef* fresh) {
 		for(const auto& entry : root.at("rarities")) {
 			const int index = IndexOf(RARITY_IDS, entry.value("id", std::string()));
 			if(index < 1)
@@ -680,6 +688,16 @@ bool LoadCustomFile() {
 				}
 			}
 		}
+}
+
+bool LoadCustomFile() {
+	try {
+		std::ifstream file("custom_rarities.json", std::ios::binary);
+		if(!file.is_open())
+			return false;
+		const auto root = nlohmann::json::parse(file);
+		CustomDef fresh[static_cast<int>(Rarity::COUNT)];
+		ParseDefs(root, fresh);
 		for(int i = 0; i < static_cast<int>(Rarity::COUNT); ++i)
 			custom_defs[i] = std::move(fresh[i]);
 		return true;
@@ -756,6 +774,70 @@ Rarity RarityFx::RuleRarity(uint32_t code) {
 	}
 	rule_cache[code] = static_cast<uint8_t>(result);
 	return result;
+}
+
+namespace {
+Rarity RarityOfId(const std::string& id) {
+	for(int i = 1; i < static_cast<int>(Rarity::COUNT); ++i)
+		if(id == RARITY_IDS[i])
+			return static_cast<Rarity>(i);
+	return Rarity::NORMAL;
+}
+}
+
+std::shared_ptr<RarityProfile> RarityFx::LoadProfile(const std::string& pack_json) {
+	try {
+		const auto pack = nlohmann::json::parse(pack_json);
+		if(!pack.is_object())
+			return nullptr;
+		auto profile = std::make_shared<RarityProfile>();
+		if(pack.contains("custom_rarities") && pack["custom_rarities"].is_object())
+			ParseDefs(pack["custom_rarities"], profile->defs);
+		if(pack.contains("rarities_txt") && pack["rarities_txt"].is_string()) {
+			std::istringstream in(pack["rarities_txt"].get<std::string>());
+			uint32_t code;
+			int value;
+			while(in >> code >> value) {
+				if(value == EXPLICIT_NORMAL)
+					profile->chosen[code] = Rarity::NORMAL;
+				else if(value > 0 && value < static_cast<int>(Rarity::COUNT))
+					profile->chosen[code] = static_cast<Rarity>(value);
+			}
+		}
+		if(pack.contains("rarity_rules") && pack["rarity_rules"].is_object())
+			RarityRules::Parse(pack["rarity_rules"].dump(), profile->rules);
+		if(pack.contains("sleeve_foil") && pack["sleeve_foil"].is_object())
+			profile->foil = RarityOfId(pack["sleeve_foil"].value("mine", std::string()));
+		return profile;
+	} catch(...) {
+		return nullptr;
+	}
+}
+
+Rarity RarityFx::ProfileGet(const RarityProfile& profile_in, uint32_t code) {
+	auto& profile = const_cast<RarityProfile&>(profile_in); //(the rule cache is only a memory)
+	const auto it = profile.chosen.find(code);
+	if(it != profile.chosen.end())
+		return it->second;
+	if(profile.rules.empty() || !gDataManager)
+		return Rarity::NORMAL;
+	const auto cached = profile.rule_cache.find(code);
+	if(cached != profile.rule_cache.end())
+		return static_cast<Rarity>(cached->second);
+	Rarity result = Rarity::NORMAL;
+	if(const auto* data = gDataManager->GetCardData(code))
+		if(const auto* rule = RarityRules::Find(profile.rules, FactsOf(*data)))
+			result = RarityOfId(rule->rarity);
+	profile.rule_cache[code] = static_cast<uint8_t>(result);
+	return result;
+}
+
+Rarity RarityFx::ProfileFoil(const RarityProfile& profile) {
+	return profile.foil;
+}
+
+void RarityFx::UseProfile(const RarityProfile* profile) {
+	active_profile = profile;
 }
 
 const char* RarityFx::Id(Rarity rarity) {
@@ -1058,6 +1140,35 @@ void RarityFx::ReloadFiles() {
 	++generation;
 }
 
+void RarityFx::ReadSleeveFoil() {
+	sleeve_foil[0] = sleeve_foil[1] = Rarity::NORMAL;
+	std::ifstream file("custom_art/foil.txt");
+	std::string line;
+	while(std::getline(file, line)) {
+		const auto equals = line.find('=');
+		if(equals == std::string::npos)
+			continue;
+		const auto key = line.substr(0, equals);
+		auto value = line.substr(equals + 1);
+		while(!value.empty() && (value.back() == '\r' || value.back() == ' '))
+			value.pop_back();
+		if(key != "mine" && key != "opponent")
+			continue;
+		for(int i = 1; i < static_cast<int>(Rarity::COUNT); ++i)
+			if(value == Id(static_cast<Rarity>(i)))
+				sleeve_foil[key == "mine" ? 0 : 1] = static_cast<Rarity>(i);
+	}
+}
+
+void RarityFx::SetSleeveFoil(int controler, Rarity rarity) {
+	sleeve_foil[controler == 1 ? 1 : 0] = rarity;
+	std::error_code ec;
+	std::filesystem::create_directories("custom_art", ec);
+	std::ofstream file("custom_art/foil.txt", std::ios::binary | std::ios::trunc);
+	file << "mine=" << (sleeve_foil[0] == Rarity::NORMAL ? "" : Id(sleeve_foil[0])) << '\n'
+		 << "opponent=" << (sleeve_foil[1] == Rarity::NORMAL ? "" : Id(sleeve_foil[1])) << '\n';
+}
+
 void RarityFx::CheckReload(uint32_t now_ms) {
 	CheckRulesReload(now_ms);
 	static uint32_t last_check = 0;
@@ -1069,6 +1180,22 @@ void RarityFx::CheckReload(uint32_t now_ms) {
 	first = false;
 	last_check = now_ms;
 	std::error_code ec;
+	{
+		//the foil of the sleeves: the Studio or a rarity pack may have written the file
+		static std::filesystem::file_time_type foil_time;
+		static bool foil_seen = false;
+		const auto foil_file_time = std::filesystem::last_write_time("custom_art/foil.txt", ec);
+		if(ec) {
+			if(foil_seen) {
+				foil_seen = false;
+				sleeve_foil[0] = sleeve_foil[1] = Rarity::NORMAL;
+			}
+		} else if(!foil_seen || foil_file_time != foil_time) {
+			foil_seen = true;
+			foil_time = foil_file_time;
+			ReadSleeveFoil();
+		}
+	}
 	const auto time = std::filesystem::last_write_time("custom_rarities.json", ec);
 	if(ec) {
 		if(had_file) {
@@ -1338,6 +1465,9 @@ void RarityFx::Draw3D(video::IVideoDriver* driver, const video::SMaterial& base,
 				continue;
 			video::SMaterial material = base;
 			material.setTexture(0, texture);
+			//the duel field is seen at a tilt and the card is small: smooth between the mipmaps and keep it sharp at an angle
+			material.TextureLayer[0].TrilinearFilter = true;
+			material.TextureLayer[0].AnisotropicFilter = 8;
 			const video::SColor color(ScaleAlpha(LayerColor(layer, seconds), alpha));
 			const float z = 0.003f;
 			video::S3DVertex v[4] = {

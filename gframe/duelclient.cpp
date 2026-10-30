@@ -30,6 +30,7 @@
 #include "porting.h"
 #include "fmt.h"
 #include "localtime.h"
+#include "profiles.h"
 
 #define DEFAULT_DUEL_RULE 5
 namespace ygo {
@@ -1636,6 +1637,7 @@ int DuelClient::ClientAnalyze(const uint8_t* msg, uint32_t len) {
 		return true;
 	}
 	case MSG_START: {
+		Profiles::ResetOpponent();
 		const auto playertype = BufferIO::Read<uint8_t>(pbuf);
 		if(mainGame->dInfo.compat_mode)
 			/*duel_rule = */BufferIO::Read<uint8_t>(pbuf);

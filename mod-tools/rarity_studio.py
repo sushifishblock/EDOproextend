@@ -588,6 +588,8 @@ class Studio(tk.Tk):
         try:
             import studio_art
             pack["art"] = studio_art.collect_art(folder)
+            pack["sleeve_foil"] = studio_art.collect_foil(folder)
+            pack["profile"] = {"id": studio_art.profile_id(folder)}
         except Exception:
             pass
 

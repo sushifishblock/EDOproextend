@@ -1,5 +1,6 @@
 #include "mod_updater.h"
 #include "deck_tags.h"
+#include "profiles.h"
 #include "rarity_rules.h"
 #include <chrono>
 #include <cstdio>
@@ -331,6 +332,16 @@ constexpr size_t PACK_MAX_SIZE = 12 * 1024 * 1024;
 constexpr size_t ART_MAX_SIZE = 4 * 1024 * 1024; //one picture of the pack (after decoding)
 
 //the pictures of the pack: only these names, written to custom_art/
+//the id of a rarity ("SR", "C3", ...) or nothing at all
+bool KnownRarityId(const std::string& id) {
+	if(id.empty())
+		return true;
+	for(const char* known : { "SR", "UR", "SCR", "GR", "PR", "GST", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8" })
+		if(id == known)
+			return true;
+	return false;
+}
+
 bool SafeArtName(const std::string& name) {
 	return name == "sleeve.png" || name == "sleeve_opponent.png" || name == "playmat.png";
 }
@@ -547,6 +558,17 @@ void RarityPack::InstallThread() {
 				art_files.emplace_back(item.key(), std::move(data));
 			}
 		}
+		//the foil over the sleeves, and who the pack is from (their id is hidden in their player name in duels)
+		std::string foil_text;
+		if(pack.contains("sleeve_foil") && pack["sleeve_foil"].is_object()) {
+			const auto mine = pack["sleeve_foil"].value("mine", std::string());
+			const auto opponent = pack["sleeve_foil"].value("opponent", std::string());
+			if(KnownRarityId(mine) && KnownRarityId(opponent))
+				foil_text = "mine=" + mine + '\n' + "opponent=" + opponent + '\n';
+		}
+		int profile_id = 0;
+		if(pack.contains("profile") && pack["profile"].is_object() && pack["profile"].contains("id") && pack["profile"]["id"].is_number_integer())
+			profile_id = pack["profile"]["id"].get<int>();
 		if(designs.empty() && assignments.empty() && decks.empty() && tag_files.empty() && rules_text.empty() && !has_art_key)
 			throw std::runtime_error("empty");
 		std::error_code ec;
@@ -565,6 +587,12 @@ void RarityPack::InstallThread() {
 			for(const auto& file : art_files)
 				WriteWithBackup(std::filesystem::path("custom_art") / file.first, file.second);
 		}
+		if(!foil_text.empty()) {
+			std::filesystem::create_directories("custom_art", ec);
+			WriteWithBackup(std::filesystem::path("custom_art") / "foil.txt", foil_text);
+		}
+		if(profile_id != Profiles::OwnId())
+			Profiles::Save(profile_id, body); //(their rarities for their cards in a duel)
 		if(!designs.empty())
 			WriteWithBackup("custom_rarities.json", designs);
 		if(!assignments.empty())
